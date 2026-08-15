@@ -102,6 +102,15 @@ the manifest also accepts a `relationships` array. Each entry names a target
 and may declare `relationship_type`, `status`, and `strength`; the resulting
 edge retains the manifest as evidence.
 
+Query explicit relationships directly with:
+
+```bash
+aine relationships --root /path/to/workspace
+```
+
+Snapshots expose the same records under `relationships`; the original
+`dependencies` collection remains available for compatibility.
+
 Preflight is read-only and reports matched projects, affected projects,
 source-of-truth rules, suggested validation commands, and unresolved changes:
 

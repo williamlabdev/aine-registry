@@ -13,6 +13,7 @@
     "checkouts": {"type": "array", "items": {"type": "object"}},
     "artifacts": {"type": "array", "items": {"$ref": "#/$defs/artifact"}},
     "dependencies": {"type": "array", "items": {"$ref": "#/$defs/dependency"}},
+    "relationships": {"type": "array", "items": {"$ref": "#/$defs/dependency"}},
     "source_of_truth": {"type": "array", "items": {"type": "object"}}
   },
   "$defs": {

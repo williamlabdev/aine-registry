@@ -430,6 +430,7 @@ def explicit_manifest_records(project: dict[str, Any], project_root: Path, works
         )
         if item.get("relationship_type"):
             edge["relationship_type"] = str(item["relationship_type"])
+            edge["relationship_source"] = "manifest"
         dependencies.append(edge)
     source_rules: list[dict[str, Any]] = []
     for item in data.get("source_of_truth", []):
@@ -640,6 +641,7 @@ def discover(workspace_roots: list[Path], excluded_names: set[str] | None = None
         else:
             grouped[grouping_key]["evidence"] = sorted(set(grouped[grouping_key]["evidence"] + edge["evidence"]))[:100]
     dependencies = sorted(grouped.values(), key=lambda e: e["dependency_id"])
+    relationships = sorted((edge for edge in dependencies if edge.get("relationship_source") == "manifest"), key=lambda e: e["dependency_id"])
     excluded = [{"name": Path(path).name, "path": str(path), "reason": "excluded_from_active_registry"} for path in sorted(set(excluded_paths))]
     root_data = [{k: v for k, v in item.items() if k != "local_path"} for item in root_records]
     snapshot: dict[str, Any] = {
@@ -647,7 +649,7 @@ def discover(workspace_roots: list[Path], excluded_names: set[str] | None = None
         "portfolio": {"portfolio_id": "default.portfolio", "name": "Default Portfolio", "workspace_roots": root_data},
         "workspace": {"roots": root_data, "root": root_data[0]["path"] if len(root_data) == 1 else None, "observed_at": datetime.now(timezone.utc).isoformat()},
         "repositories": sorted(repos.values(), key=lambda r: r["repository_id"]), "checkouts": sorted(checkouts, key=lambda c: c["checkout_id"]),
-        "projects": projects, "artifacts": sorted(artifacts, key=lambda a: a["artifact_id"]), "dependencies": dependencies,
+        "projects": projects, "artifacts": sorted(artifacts, key=lambda a: a["artifact_id"]), "dependencies": dependencies, "relationships": relationships,
         "source_of_truth": source_truth_rules(projects, artifacts) + manifest_source_truth, "findings": [], "exclusions": sorted(DEFAULT_IGNORES), "excluded_projects": excluded,
         "_local_roots": [{"root_id": item["root_id"], "local_path": item["local_path"]} for item in root_records],
     }
@@ -988,6 +990,7 @@ def command(args: argparse.Namespace) -> int:
     elif action in {"checkouts", "checkout"}: print_json(snapshot["checkouts"])
     elif action in {"artifacts", "artifact"}: print_json(snapshot["artifacts"])
     elif action in {"dependencies", "deps", "dependency"}: print_json(snapshot["dependencies"])
+    elif action in {"relationships", "relationship"}: print_json(snapshot.get("relationships", []))
     elif action in {"dependency-graph", "graph"}: print_json({"projects": snapshot["projects"], "dependencies": snapshot["dependencies"]})
     elif action in {"findings"}: print_json(snapshot["findings"])
     elif action == "source-of-truth": print_json([r for r in snapshot["source_of_truth"] if args.domain in r["domain"]])
@@ -1072,9 +1075,9 @@ def parser() -> argparse.ArgumentParser:
     init = sub.add_parser("init"); init.add_argument("--root", dest="init_roots", action="append", required=True)
     discover_cmd = sub.add_parser("discover"); discover_cmd.add_argument("positional_roots", nargs="*"); discover_cmd.add_argument("--output"); add_workspace_options(discover_cmd)
     scan_cmd = sub.add_parser("scan", help="discover projects and artifacts (alias for discover)"); scan_cmd.add_argument("positional_roots", nargs="*"); scan_cmd.add_argument("--output"); add_workspace_options(scan_cmd)
-    for name in ("projects", "project", "repositories", "repo", "checkouts", "checkout", "artifacts", "artifact", "dependencies", "deps", "dependency-graph", "graph", "findings", "workspace", "context", "validate", "handoff"):
+    for name in ("projects", "project", "repositories", "repo", "checkouts", "checkout", "artifacts", "artifact", "dependencies", "deps", "relationships", "relationship", "dependency-graph", "graph", "findings", "workspace", "context", "validate", "handoff"):
         child = sub.add_parser(name)
-        if name in {"context", "validate", "handoff", "workspace", "findings", "projects", "project", "repositories", "repo", "checkouts", "checkout", "artifacts", "artifact", "dependencies", "deps", "dependency-graph", "graph"}:
+        if name in {"context", "validate", "handoff", "workspace", "findings", "projects", "project", "repositories", "repo", "checkouts", "checkout", "artifacts", "artifact", "dependencies", "deps", "dependency", "relationships", "relationship", "dependency-graph", "graph"}:
             add_workspace_options(child)
         if name == "handoff":
             child.add_argument("--preflight", help="read a saved preflight evidence report")

@@ -166,6 +166,11 @@ evidence-backed graph edge as a dependency, while retaining an optional
 `strength`. This keeps provider-specific discovery outside the core graph model
 without inventing runtime relationships from filenames or prose.
 
+The normalized snapshot exposes manifest-backed relationship edges in a
+dedicated `relationships` collection and through `aine relationships`. They
+remain mirrored in `dependencies` so existing consumers do not need to migrate
+immediately.
+
 ## Extension boundaries
 
 The public core should remain generic. Project-specific business metadata, source-of-truth rules, service catalogs, deployment providers, enforced policy engines, agent execution, and hosted storage belong in adapters or higher-level control-plane components. The public core only evaluates the small, portable advisory policy contract described above.
