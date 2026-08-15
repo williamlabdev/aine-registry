@@ -10,7 +10,9 @@
         "id": {"type": "string"},
         "owner": {"type": "string"},
         "kind": {"type": "string"},
-        "capabilities": {"type": "array", "items": {"type": "string"}}
+        "capabilities": {"type": "array", "items": {"type": "string"}},
+        "risk": {"type": "object"},
+        "approval_required": {"type": "boolean"}
       },
       "additionalProperties": true
     },
@@ -26,6 +28,8 @@
           "role": {"enum": ["source", "generated", "projection", "evidence", "deployment", "config", "schema", "unknown"]},
           "status": {"type": "string"},
           "source_of_truth": {"type": ["string", "boolean", "null"]},
+          "risk": {"enum": ["low", "medium", "high", "critical"]},
+          "approval_required": {"type": "boolean"},
           "provenance": {"type": "object"},
           "consumers": {"type": "array"}
         },

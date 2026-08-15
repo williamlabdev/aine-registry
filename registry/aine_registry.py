@@ -229,7 +229,7 @@ def project_record(root: Path, portfolio_root: Path, workspace_root: Path, repos
         "project_id": pid, "root_id": root_id, "repository_id": repo["repository_id"], "checkout_id": checkout_id,
         "name": root.name, "path": path, "root": path, "kind": classify_project(root),
         "git": repo["git"], "runtime": runtime_metadata(root), "instructions": instructions,
-        "commands": commands, "risk": {"default": "L1", "high_risk_paths": []}, "deployment": [],
+        "commands": commands, "owner": "UNKNOWN", "capabilities": [], "risk": {"default": "low", "high_risk_paths": []}, "approval_required": False, "deployment": [],
         "evidence": [f"{path}/{name}" for name in sorted(MANIFEST_NAMES | INSTRUCTION_NAMES) if (root / name).exists()],
     }
 
@@ -281,6 +281,12 @@ def explicit_manifest_records(project: dict[str, Any], project_root: Path, works
     data, manifest_path = project_manifest(project_root)
     if not data or manifest_path is None:
         return [], [], []
+    project_metadata = data.get("project", {})
+    if isinstance(project_metadata, dict):
+        project["owner"] = project_metadata.get("owner", project.get("owner", "UNKNOWN"))
+        project["capabilities"] = project_metadata.get("capabilities", project.get("capabilities", []))
+        project["risk"] = {**project.get("risk", {}), **project_metadata.get("risk", {})} if isinstance(project_metadata.get("risk", {}), dict) else project.get("risk", {})
+        project["approval_required"] = bool(project_metadata.get("approval_required", project.get("approval_required", False)))
     evidence = f"{rel(workspace_root, project_root)}/{PROJECT_MANIFEST.as_posix()}"
     artifacts: list[dict[str, Any]] = []
     for item in data.get("artifacts", []):
@@ -301,6 +307,8 @@ def explicit_manifest_records(project: dict[str, Any], project_root: Path, works
             "content": {"status": "not_scanned"},
             "generated": item.get("role") in {"generated", "projection", "provenance"},
             "source_of_truth": item.get("source_of_truth"),
+            "risk": str(item.get("risk", "medium" if item.get("role") in {"source", "generated", "projection", "schema", "deployment"} else "low")).lower(),
+            "approval_required": bool(item.get("approval_required", False)),
             "provenance": item.get("provenance", {"status": "declared", "evidence": [evidence]}),
             "consumers": item.get("consumers", []),
             "evidence": [evidence],
@@ -645,6 +653,95 @@ def change_matches(snapshot: dict[str, Any], change: str, roots: list[Path]) -> 
     return projects, artifacts
 
 
+def git_change_set(snapshot: dict[str, Any], roots: list[Path], mode: str, base: str | None = None) -> tuple[list[str], list[dict[str, str]]]:
+    """Read changed paths from each discovered Git checkout."""
+    changes: list[str] = []
+    sources: list[dict[str, str]] = []
+    for project in snapshot["projects"]:
+        workspace_root = next((root for root in roots if root_id_for(root) == project["root_id"]), None)
+        if workspace_root is None:
+            continue
+        project_root = workspace_root / project["path"] if project["path"] != "." else workspace_root
+        if mode == "staged":
+            args = ("diff", "--cached", "--name-only", "--diff-filter=ACDMRT")
+            source_name = "git_index"
+        elif mode == "base":
+            args = ("diff", f"{base}...HEAD", "--name-only", "--diff-filter=ACDMRT")
+            source_name = f"git_base:{base}"
+        else:
+            args = ("diff", "HEAD", "--name-only", "--diff-filter=ACDMRT")
+            source_name = "git_worktree"
+        output = run_git(project_root, *args)
+        for changed in output.splitlines():
+            changed = changed.strip()
+            if not changed:
+                continue
+            workspace_path = f"{project['path']}/{changed}" if project["path"] != "." else changed
+            if workspace_path not in changes:
+                changes.append(workspace_path)
+            sources.append({"project_id": project["project_id"], "path": workspace_path, "source": source_name})
+    return sorted(changes), sorted(sources, key=lambda item: (item["project_id"], item["path"]))
+
+
+RISK_ORDER = {"low": 0, "medium": 1, "high": 2, "critical": 3}
+
+
+def risk_report(projects: list[dict[str, Any]], artifacts: list[dict[str, Any]]) -> dict[str, Any]:
+    signals: list[dict[str, Any]] = []
+    highest = "low"
+    approval_required = False
+    for artifact in artifacts:
+        level = str(artifact.get("risk", "low")).lower()
+        if level not in RISK_ORDER:
+            level = "medium"
+        if RISK_ORDER[level] > RISK_ORDER[highest]:
+            highest = level
+        requires_approval = bool(artifact.get("approval_required", False)) or level in {"high", "critical"}
+        approval_required = approval_required or requires_approval
+        if requires_approval:
+            signals.append({"type": "artifact", "artifact_id": artifact["artifact_id"], "risk": level, "reason": "declared artifact risk or approval requirement", "owner": next((p.get("owner", "UNKNOWN") for p in projects if p["project_id"] == artifact["project_id"]), "UNKNOWN")})
+    for project in projects:
+        project_risk = str(project.get("risk", {}).get("default", "low")).lower()
+        if project_risk not in RISK_ORDER:
+            project_risk = "medium"
+        if RISK_ORDER[project_risk] > RISK_ORDER[highest]:
+            highest = project_risk
+        if project.get("approval_required"):
+            approval_required = True
+            signals.append({"type": "project", "project_id": project["project_id"], "risk": project_risk, "reason": "project approval_required is true", "owner": project.get("owner", "UNKNOWN")})
+    return {"level": highest, "approval_required": approval_required, "signals": signals}
+
+
+def markdown_preflight(report: dict[str, Any]) -> str:
+    lines = ["# AINE Preflight Report", "", f"- Read-only: `{str(report['read_only']).lower()}`", f"- Risk: **{report['risk']['level']}**", f"- Approval required: `{str(report['risk']['approval_required']).lower()}`", ""]
+    lines.append("## Changes")
+    if report["changes"]:
+        lines.extend(f"- `{change}`" for change in report["changes"])
+    else:
+        lines.append("- None")
+    lines.extend(["", "## Affected Projects"])
+    if report["affected_projects"]:
+        lines.extend(f"- `{project['project_id']}` (owner: `{project.get('owner', 'UNKNOWN')}`)" for project in report["affected_projects"])
+    else:
+        lines.append("- None")
+    lines.extend(["", "## Required Validation"])
+    if report["required_validation"]:
+        lines.extend(f"- `{item['project_id']}` — `{item['check']}` ({item['command']})" for item in report["required_validation"])
+    else:
+        lines.append("- None discovered")
+    lines.extend(["", "## Human Review Signals"])
+    if report["risk"]["signals"]:
+        lines.extend(f"- `{signal.get('type')}` `{signal.get('artifact_id', signal.get('project_id', 'UNKNOWN'))}` — {signal['reason']} (owner: `{signal.get('owner', 'UNKNOWN')}`)" for signal in report["risk"]["signals"])
+    else:
+        lines.append("- None")
+    lines.extend(["", "## Unknowns"])
+    if report["unknowns"]:
+        lines.extend(f"- `{finding.get('finding_id', 'UNKNOWN')}` — {finding.get('message', 'UNKNOWN')}" for finding in report["unknowns"])
+    else:
+        lines.append("- None")
+    return "\n".join(lines) + "\n"
+
+
 def preflight(snapshot: dict[str, Any], changes: list[str], roots: list[Path]) -> dict[str, Any]:
     matched_projects: list[dict[str, Any]] = []
     matched_artifacts: list[dict[str, Any]] = []
@@ -681,6 +778,7 @@ def preflight(snapshot: dict[str, Any], changes: list[str], roots: list[Path]) -
         unknowns.append({"finding_id": "PREFLIGHT-001", "severity": "medium", "category": "change", "status": "unknown", "subject": "unresolved_changes", "message": "One or more changes did not match a registered project or artifact.", "evidence": unresolved})
     if not matched_projects and not matched_artifacts:
         unknowns.append({"finding_id": "PREFLIGHT-002", "severity": "high", "category": "boundary", "status": "human_review_required", "subject": "change_scope", "message": "The change is outside the known registry boundary; do not assume it is safe to modify.", "evidence": changes})
+    risk = risk_report(affected_projects, matched_artifacts)
     return {
         "changes": changes,
         "matched_projects": matched_projects,
@@ -689,6 +787,7 @@ def preflight(snapshot: dict[str, Any], changes: list[str], roots: list[Path]) -
         "impact": impact_reports,
         "source_of_truth": related_rules,
         "required_validation": validation,
+        "risk": risk,
         "unknowns": unknowns,
         "read_only": True,
         "snapshot_id": snapshot["snapshot_id"],
@@ -722,9 +821,21 @@ def command(args: argparse.Namespace) -> int:
         if not seed: print("impact requires --project, --path, or --artifact", file=sys.stderr); return 2
         print_json(impact(snapshot, seed))
     elif action == "preflight":
-        changes = args.change or []
+        changes = list(args.change or [])
+        change_source = "explicit"
+        git_sources: list[dict[str, str]] = []
+        if args.diff or args.staged or args.base:
+            mode = "staged" if args.staged else ("base" if args.base else "diff")
+            changes, git_sources = git_change_set(snapshot, roots, mode, args.base)
+            change_source = mode
         if not changes: print("preflight requires at least one --change", file=sys.stderr); return 2
-        print_json(preflight(snapshot, changes, roots))
+        report = preflight(snapshot, changes, roots)
+        report["change_source"] = change_source
+        report["git_sources"] = git_sources
+        if args.format == "markdown":
+            print(markdown_preflight(report), end="")
+        else:
+            print_json(report)
     elif action == "workspace": print_json(snapshot["portfolio"]["workspace_roots"])
     elif action == "context": print_json({"portfolio": snapshot["portfolio"], "projects": snapshot["projects"], "snapshot_id": snapshot["snapshot_id"]})
     elif action == "validate": print_json({"valid": no_absolute_paths(snapshot), "snapshot_id": snapshot["snapshot_id"], "findings": snapshot["findings"]})
@@ -772,7 +883,7 @@ def parser() -> argparse.ArgumentParser:
     dependency = sub.add_parser("dependency"); dependency.add_argument("subcommand", nargs="?")
     sot = sub.add_parser("source-of-truth"); sot.add_argument("domain")
     impact_cmd = sub.add_parser("impact"); impact_cmd.add_argument("target", nargs="?"); impact_cmd.add_argument("--project"); impact_cmd.add_argument("--path"); impact_cmd.add_argument("--artifact"); add_workspace_options(impact_cmd)
-    preflight_cmd = sub.add_parser("preflight", help="analyze a proposed change without mutating the workspace"); preflight_cmd.add_argument("--change", action="append", required=True, help="changed path, artifact, or project; repeat as needed"); add_workspace_options(preflight_cmd)
+    preflight_cmd = sub.add_parser("preflight", help="analyze a proposed change without mutating the workspace"); preflight_cmd.add_argument("--change", action="append", help="changed path, artifact, or project; repeat as needed"); preflight_cmd.add_argument("--diff", action="store_true", help="read staged and unstaged changes from Git"); preflight_cmd.add_argument("--staged", action="store_true", help="read staged changes from Git"); preflight_cmd.add_argument("--base", help="compare each checkout against BASE...HEAD"); preflight_cmd.add_argument("--format", choices=("json", "markdown"), default="json"); add_workspace_options(preflight_cmd)
     portfolio = sub.add_parser("portfolio"); portfolio_sub = portfolio.add_subparsers(dest="portfolio_action", required=True); pd = portfolio_sub.add_parser("discover"); pd.add_argument("--root", dest="portfolio_roots", action="append"); pd.add_argument("--output"); portfolio_sub.add_parser("list")
     return p
 

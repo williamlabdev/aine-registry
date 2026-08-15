@@ -35,7 +35,15 @@ This roadmap describes product outcomes, not promises of automatic support for e
 - [ ] Risk annotations and human-review requirements
 - [ ] Handoff and evidence record formats
 
-## v0.4 — Integrations
+## v0.4 — Change Assurance (released)
+
+- [x] Git working-tree, staged, and base comparison change discovery
+- [x] Artifact and project risk metadata
+- [x] Human-review and approval-required signals
+- [x] JSON and Markdown preflight reports
+- [ ] Handoff and evidence record formats
+
+## v0.5 — Integrations
 
 - [ ] GitHub Actions integration
 - [ ] OpenAPI, protobuf, and AsyncAPI adapters

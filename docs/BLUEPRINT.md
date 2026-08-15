@@ -83,6 +83,16 @@ Every inferred dependency should retain an evidence path or reference. The model
 4. Collect declared project validation commands (`test`, `verify`, `lint`, `build`).
 5. Report unmatched changes and registry findings as human-review signals.
 
+Git-aware modes derive changes from each discovered checkout:
+
+- `--diff` reads staged and unstaged changes relative to `HEAD`.
+- `--staged` reads the Git index.
+- `--base REF` compares `REF...HEAD`.
+
+Risk is advisory in the public core. High or critical artifact risk, or an
+explicit `approval_required`, creates a human-review signal; it does not block
+the filesystem, Git, CI, or deployment.
+
 ## Extension boundaries
 
 The public core should remain generic. Project-specific business metadata, source-of-truth rules, service catalogs, deployment providers, policy engines, agent execution, and hosted storage belong in adapters or higher-level control-plane components.

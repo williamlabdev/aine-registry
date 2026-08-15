@@ -137,6 +137,26 @@ class MultiRootRegistryTests(unittest.TestCase):
             report = registry.preflight(snapshot, ["api.yaml"], [root])
             self.assertTrue(report["matched_projects"])
 
+    def test_git_diff_preflight_reports_risk_and_markdown(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp) / "workspace"
+            root.mkdir()
+            subprocess.run(["git", "init", "-q", str(root)], check=True)
+            subprocess.run(["git", "-C", str(root), "remote", "add", "origin", "https://example.test/service.git"], check=True)
+            (root / "api.yaml").write_text("openapi: 3.0.0\n", encoding="utf-8")
+            (root / ".aine").mkdir()
+            (root / ".aine" / "registry.json").write_text(json.dumps({
+                "project": {"owner": "platform-team"},
+                "artifacts": [{"id": "service-api", "path": "api.yaml", "role": "source", "risk": "high", "approval_required": True}],
+            }), encoding="utf-8")
+            subprocess.run(["git", "-C", str(root), "add", "."], check=True)
+            subprocess.run(["git", "-C", str(root), "commit", "-qm", "initial"], check=True)
+            (root / "api.yaml").write_text("openapi: 3.0.1\n", encoding="utf-8")
+            result = subprocess.run([sys.executable, str(Path(__file__).parent / "aine_registry.py"), "preflight", "--root", str(root), "--diff", "--format", "markdown"], capture_output=True, text=True, check=True)
+            self.assertIn("Risk: **high**", result.stdout)
+            self.assertIn("platform-team", result.stdout)
+            self.assertIn("api.yaml", result.stdout)
+
     def test_remote_credentials_are_not_exported(self):
         self.assertEqual(registry.normalized_remote("https://token:secret@example.test/org/repo.git"), "https://example.test/org/repo")
 

@@ -59,9 +59,12 @@ aine scan --root /path/to/workspace
 aine impact --root /path/to/workspace --project workspace.app
 aine validate --root /path/to/workspace
 aine preflight --root /path/to/workspace --change app/api.yaml
+aine preflight --root /path/to/workspace --diff --format markdown
+aine preflight --root /path/to/workspace --staged
+aine preflight --root /path/to/workspace --base origin/main
 ```
 
-The installed `aine` command is the supported interface in v0.3.0. The Python
+The installed `aine` command is the supported interface in v0.4.0. The Python
 script entrypoint remains available for backwards compatibility.
 
 ## Project-local metadata
@@ -100,6 +103,18 @@ source-of-truth rules, suggested validation commands, and unresolved changes:
 ```bash
 aine preflight --root /path/to/workspace --change payment-service/openapi.yaml
 ```
+
+Git-aware preflight can read the working tree, index, or a base comparison:
+
+```bash
+aine preflight --root /path/to/workspace --diff
+aine preflight --root /path/to/workspace --staged
+aine preflight --root /path/to/workspace --base origin/main --format markdown
+```
+
+Artifact metadata may declare `risk` (`low`, `medium`, `high`, or `critical`)
+and `approval_required`. High and critical artifacts produce human-review
+signals; AINE does not block Git or deployment operations.
 
 For example, impact analysis against live workspace roots currently uses:
 
