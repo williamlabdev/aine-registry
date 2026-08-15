@@ -50,7 +50,15 @@ This roadmap describes product outcomes, not promises of automatic support for e
 - [x] Stable `aine.handoff.v1` record
 - [x] Human-review status and next actions
 
-## v0.6 — Integrations
+## v0.6 — Advisory Policy (released)
+
+- [x] Project-local policy declarations
+- [x] Approval thresholds by risk level
+- [x] Unknown-change and required-check policy rules
+- [x] Policy results in preflight, evidence, and handoff records
+- [x] Advisory-only behavior with no mutation or blocking
+
+## v0.7 — Integrations
 
 - [ ] GitHub Actions integration
 - [ ] OpenAPI, protobuf, and AsyncAPI adapters
@@ -60,7 +68,7 @@ This roadmap describes product outcomes, not promises of automatic support for e
 
 ## Later — Control Plane
 
-- [ ] Policy evaluation and approval workflows
+- [ ] Enforced policy evaluation and approval workflows
 - [ ] Team ownership and RBAC
 - [ ] Audit evidence storage
 - [ ] Hosted or self-hosted portfolio views

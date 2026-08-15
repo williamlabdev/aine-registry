@@ -21,7 +21,9 @@ flowchart LR
     E --> H[Handoff record]
     H --> C[Agent context / human report]
     M[.aine/registry.json metadata] --> N
-    P[Future policy layer] -. consumes .-> S
+    P[Advisory policy evaluation] -. consumes .-> S
+    F --> P
+    P --> E
 ```
 
 The core reads local files and Git metadata. It does not edit discovered projects, install dependencies, run generators, execute agents, deploy, or mutate a database.
@@ -102,9 +104,25 @@ from that record is `aine.handoff.v1` and contains the affected project scope,
 risk, required validation, unknowns, and next actions. Both records are
 portable, read-only, and suitable for review or agent context transfer.
 
+## Advisory policy evaluation
+
+Project-local policy is declarative metadata consumed during preflight. The
+v0.6 rules are intentionally small:
+
+- `require_approval_for` emits `review_required` when the preflight risk level
+  matches a configured level.
+- `deny_unknown_changes` emits `fail` when a changed path is outside the known
+  project or artifact boundary.
+- `required_checks` emits `fail` when a named validation command is not
+  discoverable for the affected project.
+
+The result is attached to the preflight report, evidence claims, and handoff.
+`fail` is an advisory finding in the public core; it does not prevent a user or
+another system from editing files, committing, running CI, or deploying.
+
 ## Extension boundaries
 
-The public core should remain generic. Project-specific business metadata, source-of-truth rules, service catalogs, deployment providers, policy engines, agent execution, and hosted storage belong in adapters or higher-level control-plane components.
+The public core should remain generic. Project-specific business metadata, source-of-truth rules, service catalogs, deployment providers, enforced policy engines, agent execution, and hosted storage belong in adapters or higher-level control-plane components. The public core only evaluates the small, portable advisory policy contract described above.
 
 ## Verification gates
 

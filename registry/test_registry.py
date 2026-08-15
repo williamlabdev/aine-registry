@@ -146,7 +146,14 @@ class MultiRootRegistryTests(unittest.TestCase):
             (root / "api.yaml").write_text("openapi: 3.0.0\n", encoding="utf-8")
             (root / ".aine").mkdir()
             (root / ".aine" / "registry.json").write_text(json.dumps({
-                "project": {"owner": "platform-team"},
+                "project": {
+                    "owner": "platform-team",
+                    "policy": {
+                        "require_approval_for": ["high"],
+                        "deny_unknown_changes": True,
+                        "required_checks": ["test"],
+                    },
+                },
                 "artifacts": [{"id": "service-api", "path": "api.yaml", "role": "source", "risk": "high", "approval_required": True}],
             }), encoding="utf-8")
             subprocess.run(["git", "-C", str(root), "add", "."], check=True)
@@ -163,7 +170,14 @@ class MultiRootRegistryTests(unittest.TestCase):
             make_git_project(root, "https://example.test/service.git", {"api.yaml": "openapi: 3.0.0\n"})
             (root / ".aine").mkdir()
             (root / ".aine" / "registry.json").write_text(json.dumps({
-                "project": {"owner": "platform-team"},
+                "project": {
+                    "owner": "platform-team",
+                    "policy": {
+                        "require_approval_for": ["high"],
+                        "deny_unknown_changes": True,
+                        "required_checks": ["test"],
+                    },
+                },
                 "artifacts": [{"id": "service-api", "path": "api.yaml", "role": "source", "risk": "high", "approval_required": True}],
             }), encoding="utf-8")
             subprocess.run(["git", "-C", str(root), "add", "."], check=True)
@@ -174,6 +188,8 @@ class MultiRootRegistryTests(unittest.TestCase):
             self.assertIn('"status": "written"', result.stdout)
             report = json.loads(evidence.read_text(encoding="utf-8"))
             self.assertEqual(report["evidence"]["schema"], "aine.evidence.v1")
+            self.assertEqual(report["policy"]["status"], "fail")
+            self.assertTrue(any(check["rule"] == "required_checks" for check in report["policy"]["checks"]))
             handoff = subprocess.run([sys.executable, str(Path(__file__).parent / "aine_registry.py"), "handoff", "--preflight", str(evidence)], capture_output=True, text=True, check=True)
             handoff_data = json.loads(handoff.stdout)
             self.assertEqual(handoff_data["schema"], "aine.handoff.v1")

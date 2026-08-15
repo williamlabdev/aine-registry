@@ -12,7 +12,8 @@
         "kind": {"type": "string"},
         "capabilities": {"type": "array", "items": {"type": "string"}},
         "risk": {"type": "object"},
-        "approval_required": {"type": "boolean"}
+        "approval_required": {"type": "boolean"},
+        "policy": {"type": "object"}
       },
       "additionalProperties": true
     },

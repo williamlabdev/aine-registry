@@ -229,7 +229,7 @@ def project_record(root: Path, portfolio_root: Path, workspace_root: Path, repos
         "project_id": pid, "root_id": root_id, "repository_id": repo["repository_id"], "checkout_id": checkout_id,
         "name": root.name, "path": path, "root": path, "kind": classify_project(root),
         "git": repo["git"], "runtime": runtime_metadata(root), "instructions": instructions,
-        "commands": commands, "owner": "UNKNOWN", "capabilities": [], "risk": {"default": "low", "high_risk_paths": []}, "approval_required": False, "deployment": [],
+        "commands": commands, "owner": "UNKNOWN", "capabilities": [], "risk": {"default": "low", "high_risk_paths": []}, "approval_required": False, "policy": {}, "deployment": [],
         "evidence": [f"{path}/{name}" for name in sorted(MANIFEST_NAMES | INSTRUCTION_NAMES) if (root / name).exists()],
     }
 
@@ -287,6 +287,7 @@ def explicit_manifest_records(project: dict[str, Any], project_root: Path, works
         project["capabilities"] = project_metadata.get("capabilities", project.get("capabilities", []))
         project["risk"] = {**project.get("risk", {}), **project_metadata.get("risk", {})} if isinstance(project_metadata.get("risk", {}), dict) else project.get("risk", {})
         project["approval_required"] = bool(project_metadata.get("approval_required", project.get("approval_required", False)))
+        project["policy"] = project_metadata.get("policy", project.get("policy", {})) if isinstance(project_metadata.get("policy", project.get("policy", {})), dict) else project.get("policy", {})
     evidence = f"{rel(workspace_root, project_root)}/{PROJECT_MANIFEST.as_posix()}"
     artifacts: list[dict[str, Any]] = []
     for item in data.get("artifacts", []):
@@ -739,11 +740,38 @@ def markdown_preflight(report: dict[str, Any]) -> str:
         lines.extend(f"- `{finding.get('finding_id', 'UNKNOWN')}` — {finding.get('message', 'UNKNOWN')}" for finding in report["unknowns"])
     else:
         lines.append("- None")
+    lines.extend(["", "## Policy"])
+    lines.append(f"- Status: **{report['policy']['status']}**")
+    for check in report["policy"]["checks"]:
+        lines.append(f"- `{check['project_id']}` `{check['rule']}` — **{check['status']}**: {check['message']}")
     return "\n".join(lines) + "\n"
 
 
+def evaluate_policy(projects: list[dict[str, Any]], validation: list[dict[str, Any]], unresolved_changes: list[str], risk: dict[str, Any]) -> dict[str, Any]:
+    checks: list[dict[str, Any]] = []
+    for project in projects:
+        policy = project.get("policy", {})
+        if not isinstance(policy, dict):
+            continue
+        project_id = project["project_id"]
+        required_risks = {str(item).lower() for item in policy.get("require_approval_for", [])}
+        if required_risks and risk["level"] in required_risks:
+            checks.append({"project_id": project_id, "rule": "require_approval_for", "status": "review_required", "message": f"risk level {risk['level']} requires human approval"})
+        if policy.get("deny_unknown_changes") and unresolved_changes:
+            checks.append({"project_id": project_id, "rule": "deny_unknown_changes", "status": "fail", "message": "one or more changed paths are outside the registered boundary"})
+        required_checks = {str(item) for item in policy.get("required_checks", [])}
+        available_checks = {item["check"] for item in validation if item["project_id"] == project_id}
+        for required_check in sorted(required_checks - available_checks):
+            checks.append({"project_id": project_id, "rule": "required_checks", "status": "fail", "message": f"required validation is not discoverable: {required_check}"})
+        if not required_checks and not (required_risks and risk["level"] in required_risks) and not (policy.get("deny_unknown_changes") and unresolved_changes):
+            checks.append({"project_id": project_id, "rule": "policy", "status": "pass", "message": "no declared policy violation"})
+    statuses = {check["status"] for check in checks}
+    status = "fail" if "fail" in statuses else ("review_required" if "review_required" in statuses else "pass")
+    return {"status": status, "checks": checks, "advisory_only": True}
+
+
 def handoff_from_preflight(report: dict[str, Any]) -> dict[str, Any]:
-    requires_review = report["risk"]["approval_required"] or bool(report["unknowns"])
+    requires_review = report["risk"]["approval_required"] or bool(report["unknowns"]) or report["policy"]["status"] != "pass"
     return {
         "schema": "aine.handoff.v1",
         "handoff_id": stable_id("handoff", report["evidence"]["evidence_id"]),
@@ -752,6 +780,7 @@ def handoff_from_preflight(report: dict[str, Any]) -> dict[str, Any]:
         "changes": report["changes"],
         "affected_projects": [{"project_id": p["project_id"], "owner": p.get("owner", "UNKNOWN")} for p in report["affected_projects"]],
         "risk": report["risk"],
+        "policy": report["policy"],
         "required_validation": report["required_validation"],
         "unknowns": report["unknowns"],
         "next_actions": (["Review risk and unknown relationships", "Run required validation"] if requires_review else ["Run required validation", "Review and merge when checks pass"]),
@@ -796,6 +825,7 @@ def preflight(snapshot: dict[str, Any], changes: list[str], roots: list[Path]) -
     if not matched_projects and not matched_artifacts:
         unknowns.append({"finding_id": "PREFLIGHT-002", "severity": "high", "category": "boundary", "status": "human_review_required", "subject": "change_scope", "message": "The change is outside the known registry boundary; do not assume it is safe to modify.", "evidence": changes})
     risk = risk_report(affected_projects, matched_artifacts)
+    policy = evaluate_policy(affected_projects, validation, unresolved, risk)
     report = {
         "changes": changes,
         "matched_projects": matched_projects,
@@ -804,10 +834,12 @@ def preflight(snapshot: dict[str, Any], changes: list[str], roots: list[Path]) -
         "impact": impact_reports,
         "source_of_truth": related_rules,
         "required_validation": validation,
+        "policy": policy,
         "risk": risk,
         "unknowns": unknowns,
         "read_only": True,
         "snapshot_id": snapshot["snapshot_id"],
+        "unresolved_changes": unresolved,
     }
     report["evidence"] = {
         "schema": "aine.evidence.v1",
@@ -818,6 +850,7 @@ def preflight(snapshot: dict[str, Any], changes: list[str], roots: list[Path]) -
             "matched_projects": [p["project_id"] for p in matched_projects],
             "affected_projects": [p["project_id"] for p in affected_projects],
             "matched_artifacts": [a["artifact_id"] for a in matched_artifacts],
+            "policy_status": policy["status"],
         },
     }
     return report

@@ -116,6 +116,24 @@ Artifact metadata may declare `risk` (`low`, `medium`, `high`, or `critical`)
 and `approval_required`. High and critical artifacts produce human-review
 signals; AINE does not block Git or deployment operations.
 
+Projects may also declare advisory policy in `.aine/registry.json`:
+
+```json
+{
+  "project": {
+    "policy": {
+      "require_approval_for": ["high", "critical"],
+      "deny_unknown_changes": true,
+      "required_checks": ["test", "lint"]
+    }
+  }
+}
+```
+
+Policy results are included in preflight, evidence, and handoff records. They
+can be `pass`, `review_required`, or `fail`, but remain advisory-only: the
+public core does not block edits, commits, CI, or deployment.
+
 Save a machine-readable evidence bundle and create a handoff record:
 
 ```bash
