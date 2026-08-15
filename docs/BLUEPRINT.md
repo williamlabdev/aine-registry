@@ -178,6 +178,10 @@ so an agent can request only the relationship slice relevant to its task.
 portable JSON response for agent handoff. It is derived from a snapshot and
 does not execute project code or persist session state.
 
+The `validate` command is the local verification gate for portable snapshots.
+It checks structural invariants and path redaction without requiring a third-
+party schema library or contacting a service.
+
 ## Extension boundaries
 
 The public core should remain generic. Project-specific business metadata, source-of-truth rules, service catalogs, deployment providers, enforced policy engines, agent execution, and hosted storage belong in adapters or higher-level control-plane components. The public core only evaluates the small, portable advisory policy contract described above.

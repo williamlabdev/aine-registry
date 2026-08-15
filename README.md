@@ -122,6 +122,16 @@ aine context --root /path/to/workspace --project checkout-service
 The result includes the selected project, its artifacts, touching dependencies
 and relationships, related source-of-truth rules, findings, and snapshot ID.
 
+Validate a snapshot before handing it to an agent or CI step:
+
+```bash
+aine validate --root /path/to/workspace
+aine validate --snapshot /tmp/aine-portfolio.json
+```
+
+Validation checks the registry schema identity, core collection shape, edge
+endpoints/scopes, required identities, and absolute-path redaction.
+
 Preflight is read-only and reports matched projects, affected projects,
 source-of-truth rules, suggested validation commands, and unresolved changes:
 

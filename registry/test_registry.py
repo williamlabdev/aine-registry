@@ -82,6 +82,16 @@ class MultiRootRegistryTests(unittest.TestCase):
             self.assertNotIn(str(Path.home()), result.stdout)
             self.assertIn('"root_id": "core"', result.stdout)
 
+    def test_validate_checks_snapshot_structure(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp) / "workspace"
+            make_git_project(root / "app", "https://example.test/app.git")
+            snapshot = registry.discover([root], excluded_names=set())
+            self.assertEqual(registry.snapshot_validation_errors(snapshot), [])
+            broken = dict(snapshot)
+            broken["projects"] = [{"name": "missing-id"}]
+            self.assertTrue(any("projects[0]" in error for error in registry.snapshot_validation_errors(broken)))
+
     def test_scan_alias_accepts_root_after_subcommand(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp) / "workspace"

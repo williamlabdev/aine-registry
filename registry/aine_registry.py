@@ -696,6 +696,34 @@ def no_absolute_paths(value: Any) -> bool:
     return not (isinstance(value, str) and LOCAL_PATH_RE.match(value))
 
 
+def snapshot_validation_errors(snapshot: dict[str, Any]) -> list[str]:
+    """Perform dependency-free structural checks for agent verification."""
+    errors: list[str] = []
+    required = {"schema", "snapshot_id", "portfolio", "projects", "repositories", "checkouts", "artifacts", "dependencies", "source_of_truth"}
+    errors.extend(f"missing top-level field: {field}" for field in sorted(required - set(snapshot)))
+    if snapshot.get("schema") != SCHEMA:
+        errors.append(f"unsupported schema: {snapshot.get('schema', 'UNKNOWN')}")
+    for collection in ("projects", "repositories", "checkouts", "artifacts", "dependencies", "source_of_truth"):
+        if collection in snapshot and not isinstance(snapshot[collection], list):
+            errors.append(f"collection is not an array: {collection}")
+    for index, project in enumerate(snapshot.get("projects", [])):
+        if not isinstance(project, dict) or not project.get("project_id"):
+            errors.append(f"projects[{index}] is missing project_id")
+    for index, artifact in enumerate(snapshot.get("artifacts", [])):
+        if not isinstance(artifact, dict) or not artifact.get("artifact_id") or not artifact.get("project_id"):
+            errors.append(f"artifacts[{index}] is missing artifact_id or project_id")
+    valid_scopes = {"intra_root", "cross_root", "external", "unknown"}
+    for collection in ("dependencies", "relationships"):
+        for index, edge in enumerate(snapshot.get(collection, [])):
+            if not isinstance(edge, dict) or not edge.get("dependency_id") or not edge.get("source") or not edge.get("target"):
+                errors.append(f"{collection}[{index}] is missing edge identity or endpoints")
+            elif edge.get("scope") not in valid_scopes:
+                errors.append(f"{collection}[{index}] has invalid scope: {edge.get('scope', 'UNKNOWN')}")
+    if not no_absolute_paths(snapshot):
+        errors.append("snapshot contains an absolute local path")
+    return errors
+
+
 def write_local_config(args: argparse.Namespace) -> int:
     entries = getattr(args, "init_roots", None) or []
     roots = []
@@ -1041,7 +1069,9 @@ def command(args: argparse.Namespace) -> int:
         selected_rules = [item for item in snapshot["source_of_truth"] if any(project_id in json.dumps(item, ensure_ascii=False) for project_id in selected_ids)]
         selected_findings = [item for item in snapshot["findings"] if any(project_id in json.dumps(item, ensure_ascii=False) for project_id in selected_ids)]
         print_json({"portfolio": snapshot["portfolio"], "projects": selected, "artifacts": selected_artifacts, "dependencies": selected_dependencies, "relationships": selected_relationships, "source_of_truth": selected_rules, "findings": selected_findings, "snapshot_id": snapshot["snapshot_id"]})
-    elif action == "validate": print_json({"valid": no_absolute_paths(snapshot), "snapshot_id": snapshot["snapshot_id"], "findings": snapshot["findings"]})
+    elif action == "validate":
+        errors = snapshot_validation_errors(snapshot)
+        print_json({"valid": not errors, "snapshot_id": snapshot.get("snapshot_id"), "errors": errors, "findings": snapshot.get("findings", [])})
     elif action == "handoff":
         if getattr(args, "preflight", None):
             try:
