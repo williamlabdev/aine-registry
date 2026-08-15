@@ -169,6 +169,11 @@ Protobuf `.proto` files are likewise registered as `schema` artifacts with
 `kind: protobuf_contract`. AINE records syntax, package, and declared service
 names without invoking `protoc` or inferring wire compatibility.
 
+AsyncAPI JSON/YAML files named `asyncapi.*` or `events.*` are registered as
+`asyncapi_contract` schema artifacts when an AsyncAPI version and `channels`
+section are present. The adapter records version and a lightweight channel
+count; event semantics and broker validation remain outside the registry core.
+
 For example, impact analysis against live workspace roots currently uses:
 
 ```bash

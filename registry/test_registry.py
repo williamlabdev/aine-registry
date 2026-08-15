@@ -150,6 +150,19 @@ class MultiRootRegistryTests(unittest.TestCase):
             self.assertEqual(contract["contract"]["package"], "orders.v1")
             self.assertEqual(contract["contract"]["services"], ["Orders"])
 
+    def test_asyncapi_contract_adapter_registers_schema_artifact(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp) / "workspace"
+            make_git_project(root / "events", "https://example.test/events.git", {
+                "asyncapi.yaml": "asyncapi: 3.0.0\ninfo:\n  title: Events\n  version: 1.0.0\nchannels:\n  order.created:\n    messages: {}\n",
+            })
+            snapshot = registry.discover([root], excluded_names=set())
+            contract = next(item for item in snapshot["artifacts"] if item["path"] == "asyncapi.yaml")
+            self.assertEqual(contract["role"], "schema")
+            self.assertEqual(contract["kind"], "asyncapi_contract")
+            self.assertEqual(contract["contract"]["format"], "asyncapi")
+            self.assertEqual(contract["contract"]["version"], "3.0.0")
+
     def test_preflight_cli_accepts_change_after_subcommand(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp) / "workspace"

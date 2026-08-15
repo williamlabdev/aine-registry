@@ -143,6 +143,10 @@ and records syntax, package, and service declarations as artifact metadata. It
 does not invoke `protoc`, generate source code, or claim compatibility between
 versions. Those operations remain explicit project or CI steps.
 
+The AsyncAPI adapter recognizes conventional AsyncAPI/event contract filenames
+and records the document version plus a lightweight channel count. It does not
+validate messages, brokers, bindings, or publish/subscribe compatibility.
+
 ## Extension boundaries
 
 The public core should remain generic. Project-specific business metadata, source-of-truth rules, service catalogs, deployment providers, enforced policy engines, agent execution, and hosted storage belong in adapters or higher-level control-plane components. The public core only evaluates the small, portable advisory policy contract described above.
