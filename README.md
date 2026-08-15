@@ -116,6 +116,16 @@ Artifact metadata may declare `risk` (`low`, `medium`, `high`, or `critical`)
 and `approval_required`. High and critical artifacts produce human-review
 signals; AINE does not block Git or deployment operations.
 
+Save a machine-readable evidence bundle and create a handoff record:
+
+```bash
+aine preflight --root /path/to/workspace --diff --output preflight.json
+aine handoff --preflight preflight.json --format markdown
+```
+
+Evidence and handoff records are deterministic, read-only artifacts for review
+and agent coordination. They do not approve, merge, deploy, or mutate projects.
+
 For example, impact analysis against live workspace roots currently uses:
 
 ```bash

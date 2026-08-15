@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aine.dev/schemas/evidence.v1.schema.json",
+  "title": "AINE Evidence Record v1",
+  "type": "object",
+  "required": ["schema", "evidence_id", "kind", "snapshot_id", "claims"],
+  "properties": {
+    "schema": {"const": "aine.evidence.v1"},
+    "evidence_id": {"type": "string"},
+    "kind": {"const": "preflight"},
+    "snapshot_id": {"type": "string"},
+    "claims": {"type": "object"}
+  }
+}

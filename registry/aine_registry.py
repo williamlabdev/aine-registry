@@ -713,7 +713,7 @@ def risk_report(projects: list[dict[str, Any]], artifacts: list[dict[str, Any]])
 
 
 def markdown_preflight(report: dict[str, Any]) -> str:
-    lines = ["# AINE Preflight Report", "", f"- Read-only: `{str(report['read_only']).lower()}`", f"- Risk: **{report['risk']['level']}**", f"- Approval required: `{str(report['risk']['approval_required']).lower()}`", ""]
+    lines = ["# AINE Preflight Report", "", f"- Evidence ID: `{report['evidence']['evidence_id']}`", f"- Read-only: `{str(report['read_only']).lower()}`", f"- Risk: **{report['risk']['level']}**", f"- Approval required: `{str(report['risk']['approval_required']).lower()}`", ""]
     lines.append("## Changes")
     if report["changes"]:
         lines.extend(f"- `{change}`" for change in report["changes"])
@@ -740,6 +740,23 @@ def markdown_preflight(report: dict[str, Any]) -> str:
     else:
         lines.append("- None")
     return "\n".join(lines) + "\n"
+
+
+def handoff_from_preflight(report: dict[str, Any]) -> dict[str, Any]:
+    requires_review = report["risk"]["approval_required"] or bool(report["unknowns"])
+    return {
+        "schema": "aine.handoff.v1",
+        "handoff_id": stable_id("handoff", report["evidence"]["evidence_id"]),
+        "evidence_id": report["evidence"]["evidence_id"],
+        "status": "human_review_required" if requires_review else "ready_for_review",
+        "changes": report["changes"],
+        "affected_projects": [{"project_id": p["project_id"], "owner": p.get("owner", "UNKNOWN")} for p in report["affected_projects"]],
+        "risk": report["risk"],
+        "required_validation": report["required_validation"],
+        "unknowns": report["unknowns"],
+        "next_actions": (["Review risk and unknown relationships", "Run required validation"] if requires_review else ["Run required validation", "Review and merge when checks pass"]),
+        "read_only": True,
+    }
 
 
 def preflight(snapshot: dict[str, Any], changes: list[str], roots: list[Path]) -> dict[str, Any]:
@@ -779,7 +796,7 @@ def preflight(snapshot: dict[str, Any], changes: list[str], roots: list[Path]) -
     if not matched_projects and not matched_artifacts:
         unknowns.append({"finding_id": "PREFLIGHT-002", "severity": "high", "category": "boundary", "status": "human_review_required", "subject": "change_scope", "message": "The change is outside the known registry boundary; do not assume it is safe to modify.", "evidence": changes})
     risk = risk_report(affected_projects, matched_artifacts)
-    return {
+    report = {
         "changes": changes,
         "matched_projects": matched_projects,
         "matched_artifacts": matched_artifacts,
@@ -792,6 +809,18 @@ def preflight(snapshot: dict[str, Any], changes: list[str], roots: list[Path]) -
         "read_only": True,
         "snapshot_id": snapshot["snapshot_id"],
     }
+    report["evidence"] = {
+        "schema": "aine.evidence.v1",
+        "evidence_id": stable_id("evidence", json.dumps([snapshot["snapshot_id"], changes, report["risk"]], ensure_ascii=False, sort_keys=True)),
+        "kind": "preflight",
+        "snapshot_id": snapshot["snapshot_id"],
+        "claims": {
+            "matched_projects": [p["project_id"] for p in matched_projects],
+            "affected_projects": [p["project_id"] for p in affected_projects],
+            "matched_artifacts": [a["artifact_id"] for a in matched_artifacts],
+        },
+    }
+    return report
 
 
 def command(args: argparse.Namespace) -> int:
@@ -832,6 +861,13 @@ def command(args: argparse.Namespace) -> int:
         report = preflight(snapshot, changes, roots)
         report["change_source"] = change_source
         report["git_sources"] = git_sources
+        if args.output:
+            output = Path(args.output).expanduser().resolve()
+            output.parent.mkdir(parents=True, exist_ok=True)
+            content = markdown_preflight(report) if args.format == "markdown" else json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
+            output.write_text(content, encoding="utf-8")
+            print_json({"status": "written", "format": args.format, "evidence_id": report["evidence"]["evidence_id"]})
+            return 0
         if args.format == "markdown":
             print(markdown_preflight(report), end="")
         else:
@@ -839,7 +875,23 @@ def command(args: argparse.Namespace) -> int:
     elif action == "workspace": print_json(snapshot["portfolio"]["workspace_roots"])
     elif action == "context": print_json({"portfolio": snapshot["portfolio"], "projects": snapshot["projects"], "snapshot_id": snapshot["snapshot_id"]})
     elif action == "validate": print_json({"valid": no_absolute_paths(snapshot), "snapshot_id": snapshot["snapshot_id"], "findings": snapshot["findings"]})
-    elif action == "handoff": print_json({"portfolio_id": snapshot["portfolio"]["portfolio_id"], "snapshot_id": snapshot["snapshot_id"], "projects": [{"project_id": p["project_id"], "root_id": p["root_id"], "checkout_id": p["checkout_id"], "path": p["path"]} for p in snapshot["projects"]], "cross_root_dependencies": sum(e["scope"] == "cross_root" for e in snapshot["dependencies"])})
+    elif action == "handoff":
+        if getattr(args, "preflight", None):
+            try:
+                report = json.loads(Path(args.preflight).expanduser().read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError) as exc:
+                print(f"could not read preflight report: {exc}", file=sys.stderr); return 2
+            handoff = handoff_from_preflight(report)
+            if args.output:
+                output = Path(args.output).expanduser().resolve(); output.parent.mkdir(parents=True, exist_ok=True)
+                output.write_text(json.dumps(handoff, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+                print_json({"status": "written", "handoff_id": handoff["handoff_id"]})
+            elif args.format == "markdown":
+                print(f"# AINE Handoff\n\n- Handoff ID: `{handoff['handoff_id']}`\n- Status: **{handoff['status']}**\n- Evidence ID: `{handoff['evidence_id']}`\n\n## Next actions\n" + "\n".join(f"- {item}" for item in handoff["next_actions"]))
+            else:
+                print_json(handoff)
+        else:
+            print_json({"portfolio_id": snapshot["portfolio"]["portfolio_id"], "snapshot_id": snapshot["snapshot_id"], "projects": [{"project_id": p["project_id"], "root_id": p["root_id"], "checkout_id": p["checkout_id"], "path": p["path"]} for p in snapshot["projects"]], "cross_root_dependencies": sum(e["scope"] == "cross_root" for e in snapshot["dependencies"])})
     else: return 2
     return 0
 
@@ -878,12 +930,16 @@ def parser() -> argparse.ArgumentParser:
         child = sub.add_parser(name)
         if name in {"context", "validate", "handoff", "workspace", "findings", "projects", "project", "repositories", "repo", "checkouts", "checkout", "artifacts", "artifact", "dependencies", "deps", "dependency-graph", "graph"}:
             add_workspace_options(child)
+        if name == "handoff":
+            child.add_argument("--preflight", help="read a saved preflight evidence report")
+            child.add_argument("--format", choices=("json", "markdown"), default="json")
+            child.add_argument("--output", help="write the handoff record")
         if name in {"project", "repo", "checkout", "artifact", "dependency", "workspace"}:
             child.add_argument("subcommand", nargs="?")
     dependency = sub.add_parser("dependency"); dependency.add_argument("subcommand", nargs="?")
     sot = sub.add_parser("source-of-truth"); sot.add_argument("domain")
     impact_cmd = sub.add_parser("impact"); impact_cmd.add_argument("target", nargs="?"); impact_cmd.add_argument("--project"); impact_cmd.add_argument("--path"); impact_cmd.add_argument("--artifact"); add_workspace_options(impact_cmd)
-    preflight_cmd = sub.add_parser("preflight", help="analyze a proposed change without mutating the workspace"); preflight_cmd.add_argument("--change", action="append", help="changed path, artifact, or project; repeat as needed"); preflight_cmd.add_argument("--diff", action="store_true", help="read staged and unstaged changes from Git"); preflight_cmd.add_argument("--staged", action="store_true", help="read staged changes from Git"); preflight_cmd.add_argument("--base", help="compare each checkout against BASE...HEAD"); preflight_cmd.add_argument("--format", choices=("json", "markdown"), default="json"); add_workspace_options(preflight_cmd)
+    preflight_cmd = sub.add_parser("preflight", help="analyze a proposed change without mutating the workspace"); preflight_cmd.add_argument("--change", action="append", help="changed path, artifact, or project; repeat as needed"); preflight_cmd.add_argument("--diff", action="store_true", help="read staged and unstaged changes from Git"); preflight_cmd.add_argument("--staged", action="store_true", help="read staged changes from Git"); preflight_cmd.add_argument("--base", help="compare each checkout against BASE...HEAD"); preflight_cmd.add_argument("--format", choices=("json", "markdown"), default="json"); preflight_cmd.add_argument("--output", help="write the preflight evidence report"); add_workspace_options(preflight_cmd)
     portfolio = sub.add_parser("portfolio"); portfolio_sub = portfolio.add_subparsers(dest="portfolio_action", required=True); pd = portfolio_sub.add_parser("discover"); pd.add_argument("--root", dest="portfolio_roots", action="append"); pd.add_argument("--output"); portfolio_sub.add_parser("list")
     return p
 

@@ -33,7 +33,6 @@ This roadmap describes product outcomes, not promises of automatic support for e
 - [x] Required validation plan derived from project commands
 - [x] Unknown and unresolved change reporting
 - [ ] Risk annotations and human-review requirements
-- [ ] Handoff and evidence record formats
 
 ## v0.4 — Change Assurance (released)
 
@@ -43,7 +42,15 @@ This roadmap describes product outcomes, not promises of automatic support for e
 - [x] JSON and Markdown preflight reports
 - [ ] Handoff and evidence record formats
 
-## v0.5 — Integrations
+## v0.5 — Evidence and Handoff (released)
+
+- [x] `aine preflight --output` evidence bundle
+- [x] Stable `aine.evidence.v1` record
+- [x] `aine handoff --preflight` handoff record
+- [x] Stable `aine.handoff.v1` record
+- [x] Human-review status and next actions
+
+## v0.6 — Integrations
 
 - [ ] GitHub Actions integration
 - [ ] OpenAPI, protobuf, and AsyncAPI adapters

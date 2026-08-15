@@ -157,6 +157,28 @@ class MultiRootRegistryTests(unittest.TestCase):
             self.assertIn("platform-team", result.stdout)
             self.assertIn("api.yaml", result.stdout)
 
+    def test_preflight_evidence_output_and_handoff(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp) / "workspace"
+            make_git_project(root, "https://example.test/service.git", {"api.yaml": "openapi: 3.0.0\n"})
+            (root / ".aine").mkdir()
+            (root / ".aine" / "registry.json").write_text(json.dumps({
+                "project": {"owner": "platform-team"},
+                "artifacts": [{"id": "service-api", "path": "api.yaml", "role": "source", "risk": "high", "approval_required": True}],
+            }), encoding="utf-8")
+            subprocess.run(["git", "-C", str(root), "add", "."], check=True)
+            subprocess.run(["git", "-C", str(root), "commit", "-qm", "initial"], check=True)
+            (root / "api.yaml").write_text("openapi: 3.0.1\n", encoding="utf-8")
+            evidence = Path(temp) / "preflight.json"
+            result = subprocess.run([sys.executable, str(Path(__file__).parent / "aine_registry.py"), "preflight", "--root", str(root), "--diff", "--output", str(evidence)], capture_output=True, text=True, check=True)
+            self.assertIn('"status": "written"', result.stdout)
+            report = json.loads(evidence.read_text(encoding="utf-8"))
+            self.assertEqual(report["evidence"]["schema"], "aine.evidence.v1")
+            handoff = subprocess.run([sys.executable, str(Path(__file__).parent / "aine_registry.py"), "handoff", "--preflight", str(evidence)], capture_output=True, text=True, check=True)
+            handoff_data = json.loads(handoff.stdout)
+            self.assertEqual(handoff_data["schema"], "aine.handoff.v1")
+            self.assertEqual(handoff_data["status"], "human_review_required")
+
     def test_remote_credentials_are_not_exported(self):
         self.assertEqual(registry.normalized_remote("https://token:secret@example.test/org/repo.git"), "https://example.test/org/repo")
 

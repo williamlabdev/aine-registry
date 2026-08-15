@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aine.dev/schemas/handoff.v1.schema.json",
+  "title": "AINE Handoff Record v1",
+  "type": "object",
+  "required": ["schema", "handoff_id", "evidence_id", "status", "changes", "affected_projects", "next_actions"],
+  "properties": {
+    "schema": {"const": "aine.handoff.v1"},
+    "handoff_id": {"type": "string"},
+    "evidence_id": {"type": "string"},
+    "status": {"enum": ["ready_for_review", "human_review_required"]},
+    "changes": {"type": "array", "items": {"type": "string"}},
+    "affected_projects": {"type": "array"},
+    "risk": {"type": "object"},
+    "required_validation": {"type": "array"},
+    "unknowns": {"type": "array"},
+    "next_actions": {"type": "array", "items": {"type": "string"}},
+    "read_only": {"const": true}
+  }
+}

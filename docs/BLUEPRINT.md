@@ -17,7 +17,9 @@ flowchart LR
     N --> S[Portable snapshot]
     S --> Q[Graph and impact queries]
     Q --> F[Preflight report]
-    F --> C[Agent context / human report]
+    F --> E[Evidence bundle]
+    E --> H[Handoff record]
+    H --> C[Agent context / human report]
     M[.aine/registry.json metadata] --> N
     P[Future policy layer] -. consumes .-> S
 ```
@@ -92,6 +94,13 @@ Git-aware modes derive changes from each discovered checkout:
 Risk is advisory in the public core. High or critical artifact risk, or an
 explicit `approval_required`, creates a human-review signal; it does not block
 the filesystem, Git, CI, or deployment.
+
+## Evidence and handoff
+
+Preflight reports can be saved as `aine.evidence.v1` records. A handoff derived
+from that record is `aine.handoff.v1` and contains the affected project scope,
+risk, required validation, unknowns, and next actions. Both records are
+portable, read-only, and suitable for review or agent context transfer.
 
 ## Extension boundaries
 
