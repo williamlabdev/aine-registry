@@ -120,6 +120,15 @@ The result is attached to the preflight report, evidence claims, and handoff.
 `fail` is an advisory finding in the public core; it does not prevent a user or
 another system from editing files, committing, running CI, or deploying.
 
+## CI integration boundary
+
+The public repository provides a reference GitHub Actions workflow. It installs
+the local CLI, compares the checked-out commit with `origin/main`, and uploads
+the JSON preflight evidence and Markdown report as workflow artifacts. The
+workflow does not approve, merge, deploy, or write back to the pull request.
+Other CI providers should use the same CLI contract rather than depending on a
+provider-specific registry implementation.
+
 ## Extension boundaries
 
 The public core should remain generic. Project-specific business metadata, source-of-truth rules, service catalogs, deployment providers, enforced policy engines, agent execution, and hosted storage belong in adapters or higher-level control-plane components. The public core only evaluates the small, portable advisory policy contract described above.

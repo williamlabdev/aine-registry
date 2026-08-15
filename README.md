@@ -144,6 +144,18 @@ aine handoff --preflight preflight.json --format markdown
 Evidence and handoff records are deterministic, read-only artifacts for review
 and agent coordination. They do not approve, merge, deploy, or mutate projects.
 
+## GitHub Actions integration
+
+The repository includes a reference workflow at
+`.github/workflows/aine-preflight.yml`. Copy it into a project or portfolio
+repository to run read-only preflight on pull requests. It compares the
+checkout with `origin/main` and uploads JSON evidence plus a Markdown report as
+the `aine-preflight` workflow artifact.
+
+The workflow assumes the checked-out repository is the registry boundary. For
+multi-root portfolios, pass additional `--root` values in the workflow and
+ensure those roots are available in the runner workspace.
+
 For example, impact analysis against live workspace roots currently uses:
 
 ```bash

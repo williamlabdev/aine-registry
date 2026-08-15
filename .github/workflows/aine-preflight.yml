@@ -1,0 +1,44 @@
+name: AINE preflight
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  preflight:
+    name: Registry preflight
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository history
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install AINE Registry
+        run: python -m pip install .
+
+      - name: Generate preflight evidence
+        run: >-
+          aine preflight --root . --base origin/main
+          --output .aine-preflight.json
+
+      - name: Generate Markdown report
+        run: >-
+          aine preflight --root . --base origin/main --format markdown
+          --output .aine-preflight.md
+
+      - name: Upload preflight reports
+        uses: actions/upload-artifact@v4
+        with:
+          name: aine-preflight
+          path: |
+            .aine-preflight.json
+            .aine-preflight.md

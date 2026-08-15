@@ -58,9 +58,9 @@ This roadmap describes product outcomes, not promises of automatic support for e
 - [x] Policy results in preflight, evidence, and handoff records
 - [x] Advisory-only behavior with no mutation or blocking
 
-## v0.7 — Integrations
+## v0.7 — Integrations (released)
 
-- [ ] GitHub Actions integration
+- [x] GitHub Actions reference workflow for PR preflight artifacts
 - [ ] OpenAPI, protobuf, and AsyncAPI adapters
 - [ ] Docker, Helm, and Kubernetes deployment adapters
 - [ ] CI test and artifact provenance adapters
