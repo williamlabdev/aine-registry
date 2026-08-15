@@ -180,6 +180,19 @@ class MultiRootRegistryTests(unittest.TestCase):
             report = registry.preflight(snapshot, ["service/deploy/service.yaml"], [root])
             self.assertEqual(report["matched_artifacts"][0]["artifact_id"], kubernetes["artifact_id"])
 
+    def test_github_actions_adapter_registers_ci_provenance_artifact(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp) / "workspace"
+            make_git_project(root / "service", "https://example.test/service.git", {
+                ".github/workflows/ci.yml": "name: CI\non:\n  pull_request:\njobs:\n  test:\n    runs-on: ubuntu-latest\n  lint:\n    runs-on: ubuntu-latest\n",
+            })
+            snapshot = registry.discover([root], excluded_names=set())
+            workflow = next(item for item in snapshot["artifacts"] if item["path"] == ".github/workflows/ci.yml")
+            self.assertEqual(workflow["role"], "provenance")
+            self.assertEqual(workflow["kind"], "github_actions_workflow")
+            self.assertEqual(workflow["ci"]["provider"], "github_actions")
+            self.assertEqual(workflow["ci"]["jobs"], ["lint", "test"])
+
     def test_preflight_cli_accepts_change_after_subcommand(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp) / "workspace"

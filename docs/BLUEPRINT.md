@@ -152,6 +152,11 @@ charts, and common Kubernetes manifests as deployment artifacts. It is a
 static boundary adapter only: it never invokes Docker, Helm, kubectl, or a
 deployment provider.
 
+The CI provenance adapter inventories GitHub Actions workflow files and their
+declared jobs as provenance artifacts. It does not execute workflows, inspect
+secret values, or convert a workflow definition into evidence that a check
+passed; runtime check results remain external evidence.
+
 ## Extension boundaries
 
 The public core should remain generic. Project-specific business metadata, source-of-truth rules, service catalogs, deployment providers, enforced policy engines, agent execution, and hosted storage belong in adapters or higher-level control-plane components. The public core only evaluates the small, portable advisory policy contract described above.

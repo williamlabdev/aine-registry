@@ -308,6 +308,23 @@ def deployment_metadata(path: Path) -> dict[str, str] | None:
     return None
 
 
+def ci_metadata(path: Path, project_root: Path) -> dict[str, Any] | None:
+    """Inventory GitHub Actions workflow structure without executing it."""
+    try:
+        relative = path.relative_to(project_root)
+    except ValueError:
+        return None
+    if len(relative.parts) != 3 or relative.parts[0:2] != (".github", "workflows") or path.suffix.lower() not in {".yml", ".yaml"}:
+        return None
+    text = read_text(path, 200_000)
+    if not re.search(r"(?:^|\n)\s*jobs\s*:", text):
+        return None
+    jobs_section = re.split(r"^jobs[ \t]*:[ \t]*$", text, maxsplit=1, flags=re.MULTILINE)[-1]
+    jobs_section = re.split(r"^[A-Za-z_][\w-]*[ \t]*:", jobs_section, maxsplit=1, flags=re.MULTILINE)[0]
+    jobs = sorted(set(re.findall(r"^[ \t]{2}([A-Za-z_][\w-]*)[ \t]*:[ \t]*$", jobs_section, re.MULTILINE)))
+    return {"provider": "github_actions", "kind": "workflow", "jobs": jobs}
+
+
 def artifact_records(root: Path, workspace_root: Path, pid: str, root_id: str) -> list[dict[str, Any]]:
     records: list[dict[str, Any]] = []
     for current, dirs, files in os.walk(root):
@@ -318,7 +335,8 @@ def artifact_records(root: Path, workspace_root: Path, pid: str, root_id: str) -
             protobuf = protobuf_metadata(path)
             asyncapi = asyncapi_metadata(path)
             deployment = deployment_metadata(path)
-            if filename not in ARTIFACT_NAMES and not any(marker in filename for marker in GENERATED_MARKERS) and contract is None and protobuf is None and asyncapi is None and deployment is None: continue
+            ci = ci_metadata(path, root)
+            if filename not in ARTIFACT_NAMES and not any(marker in filename for marker in GENERATED_MARKERS) and contract is None and protobuf is None and asyncapi is None and deployment is None and ci is None: continue
             try:
                 if path.stat().st_size > 2_000_000: continue
             except OSError:
@@ -327,15 +345,17 @@ def artifact_records(root: Path, workspace_root: Path, pid: str, root_id: str) -
             if filename in {"SYNC_STAMP", "specs-manifest.json"}: role = "provenance"
             if contract or protobuf or asyncapi: role = "schema"
             if deployment: role = "deployment"
+            if ci: role = "provenance"
             aid = f"artifact.{root_id}.{pid}.{path_rel.replace('/', '.').replace('-', '_')}"
             records.append({
                 "artifact_id": aid, "project_id": pid, "root_id": root_id, "path": path_rel,
                 "workspace_path": f"{rel(workspace_root, root)}/{path_rel}", "artifact_type": path.suffix.lstrip(".") or "file",
-                "kind": "openapi_contract" if contract else ("protobuf_contract" if protobuf else ("asyncapi_contract" if asyncapi else (deployment["kind"] if deployment else (path.suffix.lstrip(".") or "file")))), "role": role, "status": "present", "content": file_hash(path),
+                "kind": "openapi_contract" if contract else ("protobuf_contract" if protobuf else ("asyncapi_contract" if asyncapi else (deployment["kind"] if deployment else ("github_actions_workflow" if ci else (path.suffix.lstrip(".") or "file"))))), "role": role, "status": "present", "content": file_hash(path),
                 "generated": role in {"generated", "provenance"}, "source_of_truth": None,
                 "provenance": {"status": "UNKNOWN"}, "consumers": [], "evidence": [f"{rel(workspace_root, root)}/{path_rel}"],
                 **({"contract": contract or protobuf or asyncapi} if contract or protobuf or asyncapi else {}),
                 **({"deployment": deployment} if deployment else {}),
+                **({"ci": ci} if ci else {}),
             })
             if len(records) >= MAX_ARTIFACTS_PER_PROJECT: return sorted(records, key=lambda item: item["artifact_id"])
     return sorted(records, key=lambda item: item["artifact_id"])

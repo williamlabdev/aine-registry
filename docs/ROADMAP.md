@@ -65,6 +65,8 @@ This roadmap describes product outcomes, not promises of automatic support for e
 - [x] Lightweight Protobuf contract adapter
 - [x] Lightweight AsyncAPI contract adapter
 - [x] Lightweight Docker, Helm, and Kubernetes deployment adapter
+- [x] GitHub Actions workflow provenance adapter
+- [ ] Pluggable service and event relationship providers
 - [ ] Docker, Helm, and Kubernetes deployment adapters
 - [ ] CI test and artifact provenance adapters
 - [ ] Pluggable service and event relationship providers
