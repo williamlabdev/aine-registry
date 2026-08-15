@@ -1,0 +1,54 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aine.dev/schemas/project-manifest.v1.schema.json",
+  "title": "AINE Project Manifest v1",
+  "type": "object",
+  "properties": {
+    "project": {
+      "type": "object",
+      "properties": {
+        "id": {"type": "string"},
+        "owner": {"type": "string"},
+        "kind": {"type": "string"},
+        "capabilities": {"type": "array", "items": {"type": "string"}}
+      },
+      "additionalProperties": true
+    },
+    "artifacts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["path"],
+        "properties": {
+          "id": {"type": "string"},
+          "path": {"type": "string"},
+          "kind": {"type": "string"},
+          "role": {"enum": ["source", "generated", "projection", "evidence", "deployment", "config", "schema", "unknown"]},
+          "status": {"type": "string"},
+          "source_of_truth": {"type": ["string", "boolean", "null"]},
+          "provenance": {"type": "object"},
+          "consumers": {"type": "array"}
+        },
+        "additionalProperties": true
+      }
+    },
+    "dependencies": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["target"],
+        "properties": {
+          "target": {"type": "string"},
+          "kind": {"type": "string"},
+          "strength": {"type": "string"}
+        },
+        "additionalProperties": true
+      }
+    },
+    "source_of_truth": {
+      "type": "array",
+      "items": {"type": "object", "additionalProperties": true}
+    }
+  },
+  "additionalProperties": true
+}

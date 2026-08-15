@@ -1,6 +1,6 @@
 # AINE Registry Blueprint
 
-**Status:** APPROVED FOR PUBLIC CORE v0.1  
+**Status:** APPROVED FOR PUBLIC CORE v0.3
 **Scope:** local-first registry and impact analysis  
 **Related:** [Vision](VISION.md), [Roadmap](ROADMAP.md)
 
@@ -16,12 +16,17 @@ flowchart LR
     D --> N[Normalized registry model]
     N --> S[Portable snapshot]
     S --> Q[Graph and impact queries]
-    Q --> C[Agent context / human report]
-    M[Project adapter metadata] --> N
+    Q --> F[Preflight report]
+    F --> C[Agent context / human report]
+    M[.aine/registry.json metadata] --> N
     P[Future policy layer] -. consumes .-> S
 ```
 
 The core reads local files and Git metadata. It does not edit discovered projects, install dependencies, run generators, execute agents, deploy, or mutate a database.
+
+Project-local `.aine/registry.json` metadata is explicit input, not executable
+configuration. The core uses it to declare artifacts, dependencies, and
+source-of-truth relationships that static discovery cannot reliably infer.
 
 ## Core objects
 
@@ -53,7 +58,7 @@ sequenceDiagram
     Scanner->>Scanner: infer artifacts and typed edges
     Scanner->>Snapshot: normalize and redact local paths
     Snapshot-->>CLI: JSON snapshot or query result
-    CLI-->>User: graph, impact, validation, or handoff output
+    CLI-->>User: graph, impact, preflight, or validation output
 ```
 
 ## Identity and portability
@@ -67,6 +72,16 @@ sequenceDiagram
 ## Evidence and uncertainty
 
 Every inferred dependency should retain an evidence path or reference. The model distinguishes `active`, `historical`, `planned`, and `unknown` relationships. An unresolved or dynamic relationship is represented as `UNKNOWN`; it is not treated as proof that no relationship exists.
+
+## Preflight behavior
+
+`preflight` accepts one or more changed paths and produces a read-only report:
+
+1. Match changes to registered projects and artifacts.
+2. Traverse incoming dependency edges to identify affected projects.
+3. Select source-of-truth rules related to the change or affected boundary.
+4. Collect declared project validation commands (`test`, `verify`, `lint`, `build`).
+5. Report unmatched changes and registry findings as human-review signals.
 
 ## Extension boundaries
 

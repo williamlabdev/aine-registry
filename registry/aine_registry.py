@@ -38,6 +38,7 @@ INSTRUCTION_NAMES = {"CLAUDE.md", "AGENTS.md"}
 ARTIFACT_NAMES = {
     "SYNC_STAMP", "courses.generated.json", "ros_types.yaml", "specs-manifest.json",
 }
+PROJECT_MANIFEST = Path(".aine/registry.json")
 GENERATED_MARKERS = ("generated", "_gen.", ".generated.", "SYNC_STAMP")
 SCAN_SKIP_DIRS = {"data", "media", "models", "checkpoints", "logs", "reports", "fixtures", "vendor", "third_party"}
 MAX_ARTIFACTS_PER_PROJECT = 500
@@ -258,6 +259,76 @@ def artifact_records(root: Path, workspace_root: Path, pid: str, root_id: str) -
     return sorted(records, key=lambda item: item["artifact_id"])
 
 
+def portable_manifest_path(value: str) -> str:
+    """Keep explicit manifest paths relative and portable."""
+    value = str(value).strip()
+    if LOCAL_PATH_RE.match(value):
+        return "<local-path>"
+    return value.removeprefix("./")
+
+
+def project_manifest(project_root: Path) -> tuple[dict[str, Any], Path | None]:
+    path = project_root / PROJECT_MANIFEST
+    try:
+        data = json.loads(read_text(path))
+    except (OSError, json.JSONDecodeError):
+        return {}, None
+    return (data, path) if isinstance(data, dict) else ({}, None)
+
+
+def explicit_manifest_records(project: dict[str, Any], project_root: Path, workspace_root: Path, projects: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
+    """Load project-owned explicit metadata without executing project code."""
+    data, manifest_path = project_manifest(project_root)
+    if not data or manifest_path is None:
+        return [], [], []
+    evidence = f"{rel(workspace_root, project_root)}/{PROJECT_MANIFEST.as_posix()}"
+    artifacts: list[dict[str, Any]] = []
+    for item in data.get("artifacts", []):
+        if not isinstance(item, dict) or not item.get("path"):
+            continue
+        path = portable_manifest_path(item["path"])
+        artifact_id = str(item.get("id") or stable_id("artifact", f"{project['project_id']}:{path}"))
+        artifacts.append({
+            "artifact_id": artifact_id,
+            "project_id": project["project_id"],
+            "root_id": project["root_id"],
+            "path": path,
+            "workspace_path": f"{project['path']}/{path}" if project["path"] != "." else path,
+            "artifact_type": Path(path).suffix.lstrip(".") or "file",
+            "kind": item.get("kind", Path(path).suffix.lstrip(".") or "file"),
+            "role": item.get("role", "unknown"),
+            "status": item.get("status", "unknown"),
+            "content": {"status": "not_scanned"},
+            "generated": item.get("role") in {"generated", "projection", "provenance"},
+            "source_of_truth": item.get("source_of_truth"),
+            "provenance": item.get("provenance", {"status": "declared", "evidence": [evidence]}),
+            "consumers": item.get("consumers", []),
+            "evidence": [evidence],
+        })
+    dependencies: list[dict[str, Any]] = []
+    for item in data.get("dependencies", []):
+        if not isinstance(item, dict) or not item.get("target"):
+            continue
+        target_value = str(item["target"])
+        target_project = next((p for p in projects if target_value in {p["project_id"], p["name"], p["path"]}), None)
+        target_id = target_project["project_id"] if target_project else (target_value if target_value.startswith("external:") else f"external:{target_value}")
+        dependencies.append(make_edge(
+            project["project_id"], target_id, str(item.get("kind", "declared")), str(item.get("strength", "required")), "declared",
+            evidence, {"manifest": evidence, "target": target_value}, projects, target_project,
+        ))
+    source_rules: list[dict[str, Any]] = []
+    for item in data.get("source_of_truth", []):
+        if not isinstance(item, dict):
+            continue
+        rule = json.loads(json.dumps(item))
+        rule.setdefault("source_rule_id", stable_id("sot", json.dumps([project["project_id"], rule], sort_keys=True)))
+        rule.setdefault("authority", {"project_id": project["project_id"]})
+        rule.setdefault("status", "declared")
+        rule["evidence"] = sorted(set(rule.get("evidence", []) + [evidence]))
+        source_rules.append(rule)
+    return artifacts, dependencies, source_rules
+
+
 def all_package_manifests(root: Path) -> list[Path]:
     return [p for p in [root / "package.json", *root.glob("apps/*/package.json"), *root.glob("packages/*/package.json")] if p.exists()]
 
@@ -411,8 +482,19 @@ def discover(workspace_roots: list[Path], excluded_names: set[str] | None = None
     active_root_paths = [item for item in all_projects if projects_by_root[str(item)]["name"] not in excluded_names]
     projects_by_root = {str(path): projects_by_root[str(path)] for path in active_root_paths}
     artifacts: list[dict[str, Any]] = []
+    manifest_records: list[tuple[dict[str, Any], Path, Path]] = []
     for item in active_root_paths:
         p = projects_by_root[str(item)]; artifacts.extend(artifact_records(item, root_for_project[str(item)], p["project_id"], p["root_id"]))
+        manifest_records.append((p, item, root_for_project[str(item)]))
+    manifest_artifacts: list[dict[str, Any]] = []
+    manifest_dependencies: list[dict[str, Any]] = []
+    manifest_source_truth: list[dict[str, Any]] = []
+    for project, project_root, workspace_root in manifest_records:
+        explicit_artifacts, explicit_dependencies, explicit_source_truth = explicit_manifest_records(project, project_root, workspace_root, projects)
+        manifest_artifacts.extend(explicit_artifacts)
+        manifest_dependencies.extend(explicit_dependencies)
+        manifest_source_truth.extend(explicit_source_truth)
+    artifacts.extend(manifest_artifacts)
     package_index: dict[str, str] = {}
     for item in active_root_paths:
         p = projects_by_root[str(item)]
@@ -426,6 +508,7 @@ def discover(workspace_roots: list[Path], excluded_names: set[str] | None = None
         p = projects_by_root[str(item)]; workspace_root = root_for_project[str(item)]
         dependencies.extend(package_edges(item, portfolio_parent, workspace_root, p["project_id"], projects, package_index))
         dependencies.extend(text_edges(item, workspace_root, p["project_id"], active_root_paths, projects_by_root, projects))
+    dependencies.extend(manifest_dependencies)
     grouped: dict[str, dict[str, Any]] = {}
     for edge in dependencies:
         grouping_key = json.dumps([edge["source"], edge["target"], edge["kind"], edge.get("reference", {})], ensure_ascii=False, sort_keys=True)
@@ -443,7 +526,7 @@ def discover(workspace_roots: list[Path], excluded_names: set[str] | None = None
         "workspace": {"roots": root_data, "root": root_data[0]["path"] if len(root_data) == 1 else None, "observed_at": datetime.now(timezone.utc).isoformat()},
         "repositories": sorted(repos.values(), key=lambda r: r["repository_id"]), "checkouts": sorted(checkouts, key=lambda c: c["checkout_id"]),
         "projects": projects, "artifacts": sorted(artifacts, key=lambda a: a["artifact_id"]), "dependencies": dependencies,
-        "source_of_truth": source_truth_rules(projects, artifacts), "findings": [], "exclusions": sorted(DEFAULT_IGNORES), "excluded_projects": excluded,
+        "source_of_truth": source_truth_rules(projects, artifacts) + manifest_source_truth, "findings": [], "exclusions": sorted(DEFAULT_IGNORES), "excluded_projects": excluded,
         "_local_roots": [{"root_id": item["root_id"], "local_path": item["local_path"]} for item in root_records],
     }
     snapshot["findings"] = findings(projects, artifacts, dependencies, excluded)
@@ -527,6 +610,91 @@ def impact(snapshot: dict[str, Any], seed: str) -> dict[str, Any]:
     return {"query": seed, "matched_projects": matched, "matched_artifacts": matched_artifacts, "direct_edges": direct, "transitive_edges": transitive, "cross_root": any(e["scope"] == "cross_root" for e in direct + transitive), "source_of_truth": [r for r in snapshot["source_of_truth"] if seed in json.dumps(r, ensure_ascii=False)], "findings": snapshot["findings"]}
 
 
+def change_matches(snapshot: dict[str, Any], change: str, roots: list[Path]) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Resolve a changed path to registry projects and artifacts."""
+    candidates = {change, change.removeprefix("./")}
+    change_path = Path(change).expanduser()
+    if not change_path.is_absolute():
+        relative = change_path.as_posix().removeprefix("./")
+        for root in roots:
+            candidate_path = root / relative
+            if candidate_path.exists():
+                root_id = root_id_for(root)
+                candidates.add(relative)
+                for project in snapshot["projects"]:
+                    if project["root_id"] == root_id and project["path"] in {"", "."}:
+                        candidates.add(project["project_id"])
+    if change_path.is_absolute():
+        for root in roots:
+            try:
+                relative = change_path.resolve().relative_to(root.resolve()).as_posix()
+            except (OSError, ValueError):
+                continue
+            root_id = root_id_for(root)
+            candidates.update({f"{root_id}:{relative}", relative})
+            for project in snapshot["projects"]:
+                if project["root_id"] != root_id:
+                    continue
+                project_path = project["path"].rstrip("/")
+                if project_path in {"", "."} or relative == project_path or relative.startswith(project_path + "/"):
+                    candidates.add(project["project_id"])
+    projects = [p for p in snapshot["projects"] if any(value in candidates for value in {p["project_id"], p["name"], p["path"], p.get("workspace_path", "")})]
+    artifacts = [a for a in snapshot["artifacts"] if any(value in candidates for value in {a["artifact_id"], a["path"], a.get("workspace_path", "")})]
+    artifact_project_ids = {a["project_id"] for a in artifacts}
+    projects.extend(p for p in snapshot["projects"] if p["project_id"] in artifact_project_ids and p not in projects)
+    return projects, artifacts
+
+
+def preflight(snapshot: dict[str, Any], changes: list[str], roots: list[Path]) -> dict[str, Any]:
+    matched_projects: list[dict[str, Any]] = []
+    matched_artifacts: list[dict[str, Any]] = []
+    unresolved: list[str] = []
+    for change in changes:
+        projects, artifacts = change_matches(snapshot, change, roots)
+        if not projects and not artifacts:
+            unresolved.append(change)
+        for project in projects:
+            if project not in matched_projects:
+                matched_projects.append(project)
+        for artifact in artifacts:
+            if artifact not in matched_artifacts:
+                matched_artifacts.append(artifact)
+    impact_reports = [impact(snapshot, p["project_id"]) for p in matched_projects]
+    affected_ids = {p["project_id"] for p in matched_projects}
+    for report in impact_reports:
+        for edge in report["direct_edges"] + report["transitive_edges"]:
+            affected_ids.add(edge["source"]["project_id"])
+    affected_projects = [p for p in snapshot["projects"] if p["project_id"] in affected_ids]
+    validation: list[dict[str, Any]] = []
+    for project in affected_projects:
+        for name in ("test", "verify", "lint", "build"):
+            command_info = project.get("commands", {}).get(name)
+            if command_info:
+                validation.append({"project_id": project["project_id"], "check": name, **command_info})
+    related_rules = []
+    for rule in snapshot["source_of_truth"]:
+        serialized = json.dumps(rule, ensure_ascii=False)
+        if any(project["project_id"] in serialized for project in affected_projects) or any(artifact["artifact_id"] in serialized for artifact in matched_artifacts):
+            related_rules.append(rule)
+    unknowns = list(snapshot["findings"])
+    if unresolved:
+        unknowns.append({"finding_id": "PREFLIGHT-001", "severity": "medium", "category": "change", "status": "unknown", "subject": "unresolved_changes", "message": "One or more changes did not match a registered project or artifact.", "evidence": unresolved})
+    if not matched_projects and not matched_artifacts:
+        unknowns.append({"finding_id": "PREFLIGHT-002", "severity": "high", "category": "boundary", "status": "human_review_required", "subject": "change_scope", "message": "The change is outside the known registry boundary; do not assume it is safe to modify.", "evidence": changes})
+    return {
+        "changes": changes,
+        "matched_projects": matched_projects,
+        "matched_artifacts": matched_artifacts,
+        "affected_projects": affected_projects,
+        "impact": impact_reports,
+        "source_of_truth": related_rules,
+        "required_validation": validation,
+        "unknowns": unknowns,
+        "read_only": True,
+        "snapshot_id": snapshot["snapshot_id"],
+    }
+
+
 def command(args: argparse.Namespace) -> int:
     if args.action == "init":
         return write_local_config(args)
@@ -553,6 +721,10 @@ def command(args: argparse.Namespace) -> int:
         seed = args.project or args.path or args.artifact
         if not seed: print("impact requires --project, --path, or --artifact", file=sys.stderr); return 2
         print_json(impact(snapshot, seed))
+    elif action == "preflight":
+        changes = args.change or []
+        if not changes: print("preflight requires at least one --change", file=sys.stderr); return 2
+        print_json(preflight(snapshot, changes, roots))
     elif action == "workspace": print_json(snapshot["portfolio"]["workspace_roots"])
     elif action == "context": print_json({"portfolio": snapshot["portfolio"], "projects": snapshot["projects"], "snapshot_id": snapshot["snapshot_id"]})
     elif action == "validate": print_json({"valid": no_absolute_paths(snapshot), "snapshot_id": snapshot["snapshot_id"], "findings": snapshot["findings"]})
@@ -600,6 +772,7 @@ def parser() -> argparse.ArgumentParser:
     dependency = sub.add_parser("dependency"); dependency.add_argument("subcommand", nargs="?")
     sot = sub.add_parser("source-of-truth"); sot.add_argument("domain")
     impact_cmd = sub.add_parser("impact"); impact_cmd.add_argument("target", nargs="?"); impact_cmd.add_argument("--project"); impact_cmd.add_argument("--path"); impact_cmd.add_argument("--artifact"); add_workspace_options(impact_cmd)
+    preflight_cmd = sub.add_parser("preflight", help="analyze a proposed change without mutating the workspace"); preflight_cmd.add_argument("--change", action="append", required=True, help="changed path, artifact, or project; repeat as needed"); add_workspace_options(preflight_cmd)
     portfolio = sub.add_parser("portfolio"); portfolio_sub = portfolio.add_subparsers(dest="portfolio_action", required=True); pd = portfolio_sub.add_parser("discover"); pd.add_argument("--root", dest="portfolio_roots", action="append"); pd.add_argument("--output"); portfolio_sub.add_parser("list")
     return p
 

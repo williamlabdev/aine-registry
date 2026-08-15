@@ -58,11 +58,48 @@ After installation, the equivalent shorthand is:
 aine scan --root /path/to/workspace
 aine impact --root /path/to/workspace --project workspace.app
 aine validate --root /path/to/workspace
+aine preflight --root /path/to/workspace --change app/api.yaml
 ```
 
-The current release is invoked through the Python script. The shorthand commands
-`aine scan`, `aine impact`, and `aine preflight` are planned interfaces, not
-installed commands in v0.1.0. `preflight` is not implemented yet.
+The installed `aine` command is the supported interface in v0.3.0. The Python
+script entrypoint remains available for backwards compatibility.
+
+## Project-local metadata
+
+Add an optional `.aine/registry.json` file to a project when relationships
+cannot be safely inferred from code or configuration:
+
+```json
+{
+  "artifacts": [
+    {
+      "id": "payments-api",
+      "path": "openapi.yaml",
+      "role": "source",
+      "source_of_truth": true
+    }
+  ],
+  "dependencies": [
+    {"target": "workspace.payment-service", "kind": "runtime_api"}
+  ],
+  "source_of_truth": [
+    {
+      "domain": "payments.api",
+      "authority": {"project_id": "workspace.payment-service", "artifact": "payments-api"}
+    }
+  ]
+}
+```
+
+The v0.3 manifest is JSON to keep the core dependency-free. YAML adapters are
+planned for a future release.
+
+Preflight is read-only and reports matched projects, affected projects,
+source-of-truth rules, suggested validation commands, and unresolved changes:
+
+```bash
+aine preflight --root /path/to/workspace --change payment-service/openapi.yaml
+```
 
 For example, impact analysis against live workspace roots currently uses:
 

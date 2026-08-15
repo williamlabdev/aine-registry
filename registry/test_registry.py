@@ -96,6 +96,47 @@ class MultiRootRegistryTests(unittest.TestCase):
             result = subprocess.run([sys.executable, str(Path(__file__).parent / "aine_registry.py"), "impact", "--root", str(root), "--project", "app"], capture_output=True, text=True, check=True)
             self.assertIn('"query": "app"', result.stdout)
 
+    def test_manifest_metadata_and_preflight_report(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp) / "workspace"
+            provider = root / "provider"
+            consumer = root / "consumer"
+            make_git_project(provider, "https://example.test/provider.git", {"api.yaml": "openapi: 3.0.0\n"})
+            make_git_project(consumer, "https://example.test/consumer.git")
+            (provider / ".aine").mkdir()
+            (provider / ".aine" / "registry.json").write_text(json.dumps({
+                "artifacts": [{"id": "provider-api", "path": "api.yaml", "role": "source", "source_of_truth": True}],
+                "source_of_truth": [{"domain": "payments.api", "authority": {"project_id": "workspace.provider", "artifact": "provider-api"}}],
+            }), encoding="utf-8")
+            (consumer / ".aine").mkdir()
+            (consumer / ".aine" / "registry.json").write_text(json.dumps({
+                "dependencies": [{"target": "workspace.provider", "kind": "runtime_api"}],
+            }), encoding="utf-8")
+            snapshot = registry.discover([root], excluded_names=set())
+            self.assertTrue(any(a["artifact_id"] == "provider-api" for a in snapshot["artifacts"]))
+            self.assertTrue(any(e["target"]["project_id"] == "workspace.provider" and e["kind"] == "runtime_api" for e in snapshot["dependencies"]))
+            report = registry.preflight(snapshot, ["provider/api.yaml"], [root])
+            self.assertEqual([a["artifact_id"] for a in report["matched_artifacts"]], ["provider-api"])
+            self.assertIn("workspace.consumer", {p["project_id"] for p in report["affected_projects"]})
+            self.assertTrue(report["read_only"])
+            self.assertTrue(report["source_of_truth"])
+
+    def test_preflight_cli_accepts_change_after_subcommand(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp) / "workspace"
+            make_git_project(root / "app", "https://example.test/app.git", {"api.yaml": "openapi: 3.0.0\n"})
+            result = subprocess.run([sys.executable, str(Path(__file__).parent / "aine_registry.py"), "preflight", "--root", str(root), "--change", "app/api.yaml"], capture_output=True, text=True, check=True)
+            self.assertIn('"read_only": true', result.stdout)
+
+    def test_preflight_matches_change_in_workspace_root_project(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            subprocess.run(["git", "init", "-q", str(root)], check=True)
+            (root / "api.yaml").write_text("openapi: 3.0.0\n", encoding="utf-8")
+            snapshot = registry.discover([root], excluded_names=set())
+            report = registry.preflight(snapshot, ["api.yaml"], [root])
+            self.assertTrue(report["matched_projects"])
+
     def test_remote_credentials_are_not_exported(self):
         self.assertEqual(registry.normalized_remote("https://token:secret@example.test/org/repo.git"), "https://example.test/org/repo")
 
