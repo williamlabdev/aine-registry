@@ -82,6 +82,20 @@ class MultiRootRegistryTests(unittest.TestCase):
             self.assertNotIn(str(Path.home()), result.stdout)
             self.assertIn('"root_id": "core"', result.stdout)
 
+    def test_scan_alias_accepts_root_after_subcommand(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp) / "workspace"
+            make_git_project(root / "app", "https://example.test/app.git")
+            result = subprocess.run([sys.executable, str(Path(__file__).parent / "aine_registry.py"), "scan", "--root", str(root)], capture_output=True, text=True, check=True)
+            self.assertIn('"project_id": "workspace.app"', result.stdout)
+
+    def test_impact_accepts_root_after_subcommand(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp) / "workspace"
+            make_git_project(root / "app", "https://example.test/app.git")
+            result = subprocess.run([sys.executable, str(Path(__file__).parent / "aine_registry.py"), "impact", "--root", str(root), "--project", "app"], capture_output=True, text=True, check=True)
+            self.assertIn('"query": "app"', result.stdout)
+
     def test_remote_credentials_are_not_exported(self):
         self.assertEqual(registry.normalized_remote("https://token:secret@example.test/org/repo.git"), "https://example.test/org/repo")
 

@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "aine-registry"
+version = "0.2.0"
+description = "Read-only multi-root portfolio intelligence for AI-assisted software engineering"
+readme = "README.md"
+requires-python = ">=3.9"
+license = { file = "LICENSE" }
+authors = [{ name = "AINE contributors" }]
+dependencies = []
+
+[project.scripts]
+aine = "registry.aine_registry:main"
+
+[tool.setuptools.packages.find]
+include = ["registry*"]
+
+[tool.setuptools.package-data]
+registry = ["schema/*.json"]

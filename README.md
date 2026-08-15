@@ -34,6 +34,15 @@ On Windows PowerShell, use `.venv\Scripts\Activate.ps1` instead of `source .venv
 
 No package installation is required.
 
+To install the `aine` command in the optional virtual environment:
+
+```bash
+python3 -m pip install -e .
+aine --help
+```
+
+The editable install is only a CLI packaging step; the registry itself has no runtime third-party dependencies.
+
 Discover one or more workspace roots:
 
 ```bash
@@ -41,6 +50,14 @@ python3 registry/aine_registry.py --root /path/to/workspace discover
 python3 registry/aine_registry.py --root /path/to/core --root /path/to/side-projects portfolio discover --output /tmp/aine-portfolio.json
 python3 registry/aine_registry.py --snapshot /tmp/aine-portfolio.json impact --project workspace.app
 python3 registry/aine_registry.py --snapshot /tmp/aine-portfolio.json validate
+```
+
+After installation, the equivalent shorthand is:
+
+```bash
+aine scan --root /path/to/workspace
+aine impact --root /path/to/workspace --project workspace.app
+aine validate --root /path/to/workspace
 ```
 
 The current release is invoked through the Python script. The shorthand commands

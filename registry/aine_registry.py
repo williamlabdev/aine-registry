@@ -537,7 +537,7 @@ def command(args: argparse.Namespace) -> int:
     snapshot = load_snapshot(args) if args.snapshot else discover(roots, set(args.exclude_project or DEFAULT_EXCLUDED_PROJECTS))
     action = args.action
     if action == "portfolio": action = args.portfolio_action
-    if action in {"discover", "portfolio-discover"}:
+    if action in {"discover", "scan", "portfolio-discover"}:
         if args.output:
             output = Path(args.output).resolve(); output.parent.mkdir(parents=True, exist_ok=True); output.write_text(json.dumps(snapshot, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
         else: print_json(snapshot)
@@ -562,10 +562,22 @@ def command(args: argparse.Namespace) -> int:
 
 
 def load_snapshot(args: argparse.Namespace) -> dict[str, Any]:
-    configured_roots = args.roots or getattr(args, "portfolio_roots", None) or [args.workspace or "."]
     if not args.snapshot: return discover(configured_roots(args))
     try: return portable_snapshot(json.loads(Path(args.snapshot).read_text(encoding="utf-8")))
     except (OSError, json.JSONDecodeError) as exc: raise SystemExit(f"could not read snapshot: {exc}")
+
+
+def add_workspace_options(command_parser: argparse.ArgumentParser) -> None:
+    """Allow the ergonomic `aine command --root ...` form.
+
+    Global options remain supported for backwards compatibility. Suppressed
+    defaults prevent subcommand options from overwriting global values.
+    """
+    command_parser.add_argument("--workspace", default=argparse.SUPPRESS, help=argparse.SUPPRESS)
+    command_parser.add_argument("--root", dest="roots", action="append", default=argparse.SUPPRESS, help="workspace root; repeat for multi-root discovery")
+    command_parser.add_argument("--snapshot", default=argparse.SUPPRESS, help="read an existing JSON snapshot")
+    command_parser.add_argument("--exclude-project", action="append", default=argparse.SUPPRESS, help="exclude project name; repeat as needed")
+    command_parser.add_argument("--config", default=argparse.SUPPRESS, help=argparse.SUPPRESS)
 
 
 def parser() -> argparse.ArgumentParser:
@@ -577,21 +589,28 @@ def parser() -> argparse.ArgumentParser:
     p.add_argument("--config", help="local-only config path; never included in portable snapshots")
     sub = p.add_subparsers(dest="action", required=True)
     init = sub.add_parser("init"); init.add_argument("--root", dest="init_roots", action="append", required=True)
-    discover_cmd = sub.add_parser("discover"); discover_cmd.add_argument("positional_roots", nargs="*"); discover_cmd.add_argument("--output")
+    discover_cmd = sub.add_parser("discover"); discover_cmd.add_argument("positional_roots", nargs="*"); discover_cmd.add_argument("--output"); add_workspace_options(discover_cmd)
+    scan_cmd = sub.add_parser("scan", help="discover projects and artifacts (alias for discover)"); scan_cmd.add_argument("positional_roots", nargs="*"); scan_cmd.add_argument("--output"); add_workspace_options(scan_cmd)
     for name in ("projects", "project", "repositories", "repo", "checkouts", "checkout", "artifacts", "artifact", "dependencies", "deps", "dependency-graph", "graph", "findings", "workspace", "context", "validate", "handoff"):
         child = sub.add_parser(name)
+        if name in {"context", "validate", "handoff", "workspace", "findings", "projects", "project", "repositories", "repo", "checkouts", "checkout", "artifacts", "artifact", "dependencies", "deps", "dependency-graph", "graph"}:
+            add_workspace_options(child)
         if name in {"project", "repo", "checkout", "artifact", "dependency", "workspace"}:
             child.add_argument("subcommand", nargs="?")
     dependency = sub.add_parser("dependency"); dependency.add_argument("subcommand", nargs="?")
     sot = sub.add_parser("source-of-truth"); sot.add_argument("domain")
-    impact_cmd = sub.add_parser("impact"); impact_cmd.add_argument("target", nargs="?"); impact_cmd.add_argument("--project"); impact_cmd.add_argument("--path"); impact_cmd.add_argument("--artifact")
+    impact_cmd = sub.add_parser("impact"); impact_cmd.add_argument("target", nargs="?"); impact_cmd.add_argument("--project"); impact_cmd.add_argument("--path"); impact_cmd.add_argument("--artifact"); add_workspace_options(impact_cmd)
     portfolio = sub.add_parser("portfolio"); portfolio_sub = portfolio.add_subparsers(dest="portfolio_action", required=True); pd = portfolio_sub.add_parser("discover"); pd.add_argument("--root", dest="portfolio_roots", action="append"); pd.add_argument("--output"); portfolio_sub.add_parser("list")
     return p
 
 
-if __name__ == "__main__":
-    parsed = parser().parse_args()
-    if parsed.action == "discover" and getattr(parsed, "positional_roots", None):
+def main(argv: list[str] | None = None) -> int:
+    parsed = parser().parse_args(argv)
+    if parsed.action in {"discover", "scan"} and getattr(parsed, "positional_roots", None):
         parsed.roots = parsed.positional_roots
     if parsed.action == "impact" and getattr(parsed, "target", None) and not (parsed.project or parsed.path or parsed.artifact): parsed.project = parsed.target
-    raise SystemExit(command(parsed))
+    return command(parsed)
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

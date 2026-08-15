@@ -14,9 +14,11 @@ This roadmap describes product outcomes, not promises of automatic support for e
 - [x] Provide a versioned JSON Schema
 - [x] Keep discovery read-only and dependency-free
 
-## v0.2 — Developer Workflow
+## v0.2 — Developer Workflow (in progress)
 
-- [ ] Stable `aine` executable wrapper
+- [x] Stable `aine` executable wrapper
+- [x] `scan`, `impact`, and `validate` command forms
+- [x] Installable package metadata with no runtime dependencies
 - [ ] Project-local registry manifest for explicit metadata
 - [ ] Generic source-of-truth declarations
 - [ ] Artifact provenance and consumer declarations
