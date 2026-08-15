@@ -106,6 +106,8 @@ Query explicit relationships directly with:
 
 ```bash
 aine relationships --root /path/to/workspace
+aine relationships --root /path/to/workspace --relationship-type event_consumer
+aine relationships --root /path/to/workspace --relationship-status planned
 ```
 
 Snapshots expose the same records under `relationships`; the original

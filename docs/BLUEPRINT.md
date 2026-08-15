@@ -171,6 +171,9 @@ dedicated `relationships` collection and through `aine relationships`. They
 remain mirrored in `dependencies` so existing consumers do not need to migrate
 immediately.
 
+The CLI query can filter by project, `relationship_type`, and lifecycle status,
+so an agent can request only the relationship slice relevant to its task.
+
 ## Extension boundaries
 
 The public core should remain generic. Project-specific business metadata, source-of-truth rules, service catalogs, deployment providers, enforced policy engines, agent execution, and hosted storage belong in adapters or higher-level control-plane components. The public core only evaluates the small, portable advisory policy contract described above.

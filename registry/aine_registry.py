@@ -990,7 +990,15 @@ def command(args: argparse.Namespace) -> int:
     elif action in {"checkouts", "checkout"}: print_json(snapshot["checkouts"])
     elif action in {"artifacts", "artifact"}: print_json(snapshot["artifacts"])
     elif action in {"dependencies", "deps", "dependency"}: print_json(snapshot["dependencies"])
-    elif action in {"relationships", "relationship"}: print_json(snapshot.get("relationships", []))
+    elif action in {"relationships", "relationship"}:
+        relationships = snapshot.get("relationships", [])
+        if getattr(args, "project", None):
+            relationships = [item for item in relationships if args.project in {item["source"]["project_id"], item["target"]["project_id"]}]
+        if getattr(args, "relationship_type", None):
+            relationships = [item for item in relationships if item.get("relationship_type") == args.relationship_type]
+        if getattr(args, "relationship_status", None):
+            relationships = [item for item in relationships if item.get("status") == args.relationship_status]
+        print_json(relationships)
     elif action in {"dependency-graph", "graph"}: print_json({"projects": snapshot["projects"], "dependencies": snapshot["dependencies"]})
     elif action in {"findings"}: print_json(snapshot["findings"])
     elif action == "source-of-truth": print_json([r for r in snapshot["source_of_truth"] if args.domain in r["domain"]])
@@ -1079,6 +1087,10 @@ def parser() -> argparse.ArgumentParser:
         child = sub.add_parser(name)
         if name in {"context", "validate", "handoff", "workspace", "findings", "projects", "project", "repositories", "repo", "checkouts", "checkout", "artifacts", "artifact", "dependencies", "deps", "dependency", "relationships", "relationship", "dependency-graph", "graph"}:
             add_workspace_options(child)
+        if name in {"relationships", "relationship"}:
+            child.add_argument("--project", help="filter relationships touching a project")
+            child.add_argument("--relationship-type", help="filter by relationship_type")
+            child.add_argument("--relationship-status", help="filter by lifecycle status")
         if name == "handoff":
             child.add_argument("--preflight", help="read a saved preflight evidence report")
             child.add_argument("--format", choices=("json", "markdown"), default="json")
