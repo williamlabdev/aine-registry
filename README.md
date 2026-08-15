@@ -12,7 +12,29 @@ AINE Registry discovers the boundaries and relationships an AI coding agent need
 
 It is deliberately a small, local-first core. It does not edit projects, install packages, run generators, deploy, execute agents, or upload source code.
 
+## Requirements
+
+- Python 3.9 or newer
+- No third-party Python packages
+
+The repository does not include a virtual environment. A virtual environment is local machine state and must not be committed. It is optional for this dependency-free core, but recommended for isolated development.
+
 ## Quick start
+
+Clone the repository and create an optional virtual environment:
+
+```bash
+git clone https://github.com/williamlabdev/aine-registry.git
+cd aine-registry
+python3 -m venv .venv
+source .venv/bin/activate
+```
+
+On Windows PowerShell, use `.venv\\Scripts\\Activate.ps1` instead of `source .venv/bin/activate`.
+
+No package installation is required.
+
+Discover one or more workspace roots:
 
 ```bash
 python3 registry/aine_registry.py --root /path/to/workspace discover
@@ -21,7 +43,7 @@ python3 registry/aine_registry.py --snapshot /tmp/aine-portfolio.json impact --p
 python3 registry/aine_registry.py --snapshot /tmp/aine-portfolio.json validate
 ```
 
-Run tests:
+Run the test suite:
 
 ```bash
 python3 -m unittest discover -s registry -p 'test_*.py' -v
