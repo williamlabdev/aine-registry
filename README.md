@@ -156,6 +156,15 @@ The workflow assumes the checked-out repository is the registry boundary. For
 multi-root portfolios, pass additional `--root` values in the workflow and
 ensure those roots are available in the runner workspace.
 
+## Contract adapters
+
+The built-in OpenAPI adapter recognizes `api.*`, `openapi.*`, and `swagger.*`
+JSON/YAML files when they contain an OpenAPI version declaration. It registers
+them as `schema` artifacts with `kind: openapi_contract`, including the format
+and version, so contract changes participate in preflight and impact analysis.
+The adapter is deliberately syntax-light and does not validate the complete
+OpenAPI document; use a dedicated validator in project CI for that purpose.
+
 For example, impact analysis against live workspace roots currently uses:
 
 ```bash

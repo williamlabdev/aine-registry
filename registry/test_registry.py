@@ -121,6 +121,20 @@ class MultiRootRegistryTests(unittest.TestCase):
             self.assertTrue(report["read_only"])
             self.assertTrue(report["source_of_truth"])
 
+    def test_openapi_contract_adapter_registers_schema_artifact(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp) / "workspace"
+            make_git_project(root / "service", "https://example.test/service.git", {
+                "openapi.yaml": "openapi: 3.0.3\ninfo:\n  title: Service\n  version: 1.0.0\npaths: {}\n",
+            })
+            snapshot = registry.discover([root], excluded_names=set())
+            contract = next(item for item in snapshot["artifacts"] if item["path"] == "openapi.yaml")
+            self.assertEqual(contract["role"], "schema")
+            self.assertEqual(contract["kind"], "openapi_contract")
+            self.assertEqual(contract["contract"], {"format": "openapi", "version": "3.0.3"})
+            report = registry.preflight(snapshot, ["service/openapi.yaml"], [root])
+            self.assertEqual([item["artifact_id"] for item in report["matched_artifacts"]], [contract["artifact_id"]])
+
     def test_preflight_cli_accepts_change_after_subcommand(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp) / "workspace"

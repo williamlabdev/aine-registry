@@ -129,6 +129,15 @@ workflow does not approve, merge, deploy, or write back to the pull request.
 Other CI providers should use the same CLI contract rather than depending on a
 provider-specific registry implementation.
 
+## Contract adapter boundary
+
+The OpenAPI adapter is intentionally a discovery adapter, not a validator. It
+recognizes conventional JSON/YAML filenames plus an `openapi` version marker,
+then emits a normal schema artifact with a small `contract` metadata object.
+Full document validation, code generation, compatibility checks, and service
+ownership remain project or CI responsibilities until a future adapter defines
+those contracts explicitly.
+
 ## Extension boundaries
 
 The public core should remain generic. Project-specific business metadata, source-of-truth rules, service catalogs, deployment providers, enforced policy engines, agent execution, and hosted storage belong in adapters or higher-level control-plane components. The public core only evaluates the small, portable advisory policy contract described above.

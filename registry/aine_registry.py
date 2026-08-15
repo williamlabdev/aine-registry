@@ -38,6 +38,10 @@ INSTRUCTION_NAMES = {"CLAUDE.md", "AGENTS.md"}
 ARTIFACT_NAMES = {
     "SYNC_STAMP", "courses.generated.json", "ros_types.yaml", "specs-manifest.json",
 }
+API_CONTRACT_NAMES = {
+    "api.json", "api.yaml", "api.yml", "openapi.json", "openapi.yaml", "openapi.yml",
+    "swagger.json", "swagger.yaml", "swagger.yml",
+}
 PROJECT_MANIFEST = Path(".aine/registry.json")
 GENERATED_MARKERS = ("generated", "_gen.", ".generated.", "SYNC_STAMP")
 SCAN_SKIP_DIRS = {"data", "media", "models", "checkpoints", "logs", "reports", "fixtures", "vendor", "third_party"}
@@ -234,26 +238,42 @@ def project_record(root: Path, portfolio_root: Path, workspace_root: Path, repos
     }
 
 
+def openapi_metadata(path: Path) -> dict[str, str] | None:
+    """Detect an OpenAPI contract without requiring a YAML dependency."""
+    if path.name.lower() not in API_CONTRACT_NAMES:
+        return None
+    text = read_text(path, 200_000)
+    json_match = re.search(r'"openapi"\s*:\s*["\']?([0-9]+(?:\.[0-9]+)*)', text)
+    yaml_match = re.search(r"(?:^|\n)\s*openapi\s*:\s*[\"']?([0-9]+(?:\.[0-9]+)*)", text)
+    version = (json_match or yaml_match).group(1) if (json_match or yaml_match) else None
+    if not version:
+        return None
+    return {"format": "openapi", "version": version}
+
+
 def artifact_records(root: Path, workspace_root: Path, pid: str, root_id: str) -> list[dict[str, Any]]:
     records: list[dict[str, Any]] = []
     for current, dirs, files in os.walk(root):
         dirs[:] = [d for d in dirs if d not in DEFAULT_IGNORES and d not in SCAN_SKIP_DIRS]
         for filename in files:
             path = Path(current) / filename; path_rel = rel(root, path)
-            if filename not in ARTIFACT_NAMES and not any(marker in filename for marker in GENERATED_MARKERS): continue
+            contract = openapi_metadata(path)
+            if filename not in ARTIFACT_NAMES and not any(marker in filename for marker in GENERATED_MARKERS) and contract is None: continue
             try:
                 if path.stat().st_size > 2_000_000: continue
             except OSError:
                 continue
             role = "generated" if any(marker in filename for marker in GENERATED_MARKERS) else "source"
             if filename in {"SYNC_STAMP", "specs-manifest.json"}: role = "provenance"
+            if contract: role = "schema"
             aid = f"artifact.{root_id}.{pid}.{path_rel.replace('/', '.').replace('-', '_')}"
             records.append({
                 "artifact_id": aid, "project_id": pid, "root_id": root_id, "path": path_rel,
                 "workspace_path": f"{rel(workspace_root, root)}/{path_rel}", "artifact_type": path.suffix.lstrip(".") or "file",
-                "kind": path.suffix.lstrip(".") or "file", "role": role, "status": "present", "content": file_hash(path),
+                "kind": "openapi_contract" if contract else (path.suffix.lstrip(".") or "file"), "role": role, "status": "present", "content": file_hash(path),
                 "generated": role in {"generated", "provenance"}, "source_of_truth": None,
                 "provenance": {"status": "UNKNOWN"}, "consumers": [], "evidence": [f"{rel(workspace_root, root)}/{path_rel}"],
+                **({"contract": contract} if contract else {}),
             })
             if len(records) >= MAX_ARTIFACTS_PER_PROJECT: return sorted(records, key=lambda item: item["artifact_id"])
     return sorted(records, key=lambda item: item["artifact_id"])
@@ -503,7 +523,14 @@ def discover(workspace_roots: list[Path], excluded_names: set[str] | None = None
         manifest_artifacts.extend(explicit_artifacts)
         manifest_dependencies.extend(explicit_dependencies)
         manifest_source_truth.extend(explicit_source_truth)
-    artifacts.extend(manifest_artifacts)
+    merged_artifacts: dict[tuple[str, str], dict[str, Any]] = {
+        (item["project_id"], item["path"]): item for item in artifacts
+    }
+    # Explicit project metadata is authoritative when it describes a path
+    # already recognized by a built-in adapter.
+    for item in manifest_artifacts:
+        merged_artifacts[(item["project_id"], item["path"])] = item
+    artifacts = list(merged_artifacts.values())
     package_index: dict[str, str] = {}
     for item in active_root_paths:
         p = projects_by_root[str(item)]

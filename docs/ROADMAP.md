@@ -61,7 +61,8 @@ This roadmap describes product outcomes, not promises of automatic support for e
 ## v0.7 — Integrations (released)
 
 - [x] GitHub Actions reference workflow for PR preflight artifacts
-- [ ] OpenAPI, protobuf, and AsyncAPI adapters
+- [x] Lightweight OpenAPI contract adapter
+- [ ] Protobuf and AsyncAPI adapters
 - [ ] Docker, Helm, and Kubernetes deployment adapters
 - [ ] CI test and artifact provenance adapters
 - [ ] Pluggable service and event relationship providers
