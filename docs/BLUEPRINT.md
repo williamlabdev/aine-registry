@@ -138,6 +138,11 @@ Full document validation, code generation, compatibility checks, and service
 ownership remain project or CI responsibilities until a future adapter defines
 those contracts explicitly.
 
+The Protobuf adapter follows the same boundary: it recognizes `.proto` files
+and records syntax, package, and service declarations as artifact metadata. It
+does not invoke `protoc`, generate source code, or claim compatibility between
+versions. Those operations remain explicit project or CI steps.
+
 ## Extension boundaries
 
 The public core should remain generic. Project-specific business metadata, source-of-truth rules, service catalogs, deployment providers, enforced policy engines, agent execution, and hosted storage belong in adapters or higher-level control-plane components. The public core only evaluates the small, portable advisory policy contract described above.

@@ -135,6 +135,21 @@ class MultiRootRegistryTests(unittest.TestCase):
             report = registry.preflight(snapshot, ["service/openapi.yaml"], [root])
             self.assertEqual([item["artifact_id"] for item in report["matched_artifacts"]], [contract["artifact_id"]])
 
+    def test_protobuf_contract_adapter_registers_schema_artifact(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp) / "workspace"
+            make_git_project(root / "service", "https://example.test/service.git", {
+                "proto/orders.proto": "syntax = \"proto3\";\npackage orders.v1;\nservice Orders { rpc GetOrder (GetOrderRequest) returns (Order); }\nmessage Order { string id = 1; }\n",
+            })
+            snapshot = registry.discover([root], excluded_names=set())
+            contract = next(item for item in snapshot["artifacts"] if item["path"] == "proto/orders.proto")
+            self.assertEqual(contract["role"], "schema")
+            self.assertEqual(contract["kind"], "protobuf_contract")
+            self.assertEqual(contract["contract"]["format"], "protobuf")
+            self.assertEqual(contract["contract"]["syntax"], "proto3")
+            self.assertEqual(contract["contract"]["package"], "orders.v1")
+            self.assertEqual(contract["contract"]["services"], ["Orders"])
+
     def test_preflight_cli_accepts_change_after_subcommand(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp) / "workspace"

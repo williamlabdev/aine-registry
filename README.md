@@ -165,6 +165,10 @@ and version, so contract changes participate in preflight and impact analysis.
 The adapter is deliberately syntax-light and does not validate the complete
 OpenAPI document; use a dedicated validator in project CI for that purpose.
 
+Protobuf `.proto` files are likewise registered as `schema` artifacts with
+`kind: protobuf_contract`. AINE records syntax, package, and declared service
+names without invoking `protoc` or inferring wire compatibility.
+
 For example, impact analysis against live workspace roots currently uses:
 
 ```bash

@@ -251,6 +251,24 @@ def openapi_metadata(path: Path) -> dict[str, str] | None:
     return {"format": "openapi", "version": version}
 
 
+def protobuf_metadata(path: Path) -> dict[str, Any] | None:
+    """Detect a protobuf schema and collect only lightweight declarations."""
+    if path.suffix.lower() != ".proto":
+        return None
+    text = read_text(path, 300_000)
+    if not re.search(r"\b(?:syntax|package|message|enum|service|rpc)\b", text):
+        return None
+    syntax_match = re.search(r'\bsyntax\s*=\s*["\'](proto[23])["\']', text)
+    package_match = re.search(r"\bpackage\s+([A-Za-z_][\w.]*)\s*;", text)
+    services = sorted(set(re.findall(r"\bservice\s+([A-Za-z_][\w]*)\s*\{", text)))
+    return {
+        "format": "protobuf",
+        "syntax": syntax_match.group(1) if syntax_match else "UNKNOWN",
+        "package": package_match.group(1) if package_match else "UNKNOWN",
+        "services": services,
+    }
+
+
 def artifact_records(root: Path, workspace_root: Path, pid: str, root_id: str) -> list[dict[str, Any]]:
     records: list[dict[str, Any]] = []
     for current, dirs, files in os.walk(root):
@@ -258,22 +276,23 @@ def artifact_records(root: Path, workspace_root: Path, pid: str, root_id: str) -
         for filename in files:
             path = Path(current) / filename; path_rel = rel(root, path)
             contract = openapi_metadata(path)
-            if filename not in ARTIFACT_NAMES and not any(marker in filename for marker in GENERATED_MARKERS) and contract is None: continue
+            protobuf = protobuf_metadata(path)
+            if filename not in ARTIFACT_NAMES and not any(marker in filename for marker in GENERATED_MARKERS) and contract is None and protobuf is None: continue
             try:
                 if path.stat().st_size > 2_000_000: continue
             except OSError:
                 continue
             role = "generated" if any(marker in filename for marker in GENERATED_MARKERS) else "source"
             if filename in {"SYNC_STAMP", "specs-manifest.json"}: role = "provenance"
-            if contract: role = "schema"
+            if contract or protobuf: role = "schema"
             aid = f"artifact.{root_id}.{pid}.{path_rel.replace('/', '.').replace('-', '_')}"
             records.append({
                 "artifact_id": aid, "project_id": pid, "root_id": root_id, "path": path_rel,
                 "workspace_path": f"{rel(workspace_root, root)}/{path_rel}", "artifact_type": path.suffix.lstrip(".") or "file",
-                "kind": "openapi_contract" if contract else (path.suffix.lstrip(".") or "file"), "role": role, "status": "present", "content": file_hash(path),
+                "kind": "openapi_contract" if contract else ("protobuf_contract" if protobuf else (path.suffix.lstrip(".") or "file")), "role": role, "status": "present", "content": file_hash(path),
                 "generated": role in {"generated", "provenance"}, "source_of_truth": None,
                 "provenance": {"status": "UNKNOWN"}, "consumers": [], "evidence": [f"{rel(workspace_root, root)}/{path_rel}"],
-                **({"contract": contract} if contract else {}),
+                **({"contract": contract or protobuf} if contract or protobuf else {}),
             })
             if len(records) >= MAX_ARTIFACTS_PER_PROJECT: return sorted(records, key=lambda item: item["artifact_id"])
     return sorted(records, key=lambda item: item["artifact_id"])
