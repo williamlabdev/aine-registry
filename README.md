@@ -30,7 +30,7 @@ python3 -m venv .venv
 source .venv/bin/activate
 ```
 
-On Windows PowerShell, use `.venv\\Scripts\\Activate.ps1` instead of `source .venv/bin/activate`.
+On Windows PowerShell, use `.venv\Scripts\Activate.ps1` instead of `source .venv/bin/activate`.
 
 No package installation is required.
 
