@@ -174,6 +174,10 @@ immediately.
 The CLI query can filter by project, `relationship_type`, and lifecycle status,
 so an agent can request only the relationship slice relevant to its task.
 
+`aine context --project PROJECT` packages the same scoped graph into one
+portable JSON response for agent handoff. It is derived from a snapshot and
+does not execute project code or persist session state.
+
 ## Extension boundaries
 
 The public core should remain generic. Project-specific business metadata, source-of-truth rules, service catalogs, deployment providers, enforced policy engines, agent execution, and hosted storage belong in adapters or higher-level control-plane components. The public core only evaluates the small, portable advisory policy contract described above.

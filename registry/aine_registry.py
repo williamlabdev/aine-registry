@@ -1030,7 +1030,17 @@ def command(args: argparse.Namespace) -> int:
         else:
             print_json(report)
     elif action == "workspace": print_json(snapshot["portfolio"]["workspace_roots"])
-    elif action == "context": print_json({"portfolio": snapshot["portfolio"], "projects": snapshot["projects"], "snapshot_id": snapshot["snapshot_id"]})
+    elif action == "context":
+        selected = snapshot["projects"]
+        if getattr(args, "project", None):
+            selected = [item for item in selected if args.project in {item["project_id"], item["name"], item["path"]}]
+        selected_ids = {item["project_id"] for item in selected}
+        selected_artifacts = [item for item in snapshot["artifacts"] if item["project_id"] in selected_ids]
+        selected_dependencies = [item for item in snapshot["dependencies"] if item["source"]["project_id"] in selected_ids or item["target"]["project_id"] in selected_ids]
+        selected_relationships = [item for item in snapshot.get("relationships", []) if item["source"]["project_id"] in selected_ids or item["target"]["project_id"] in selected_ids]
+        selected_rules = [item for item in snapshot["source_of_truth"] if any(project_id in json.dumps(item, ensure_ascii=False) for project_id in selected_ids)]
+        selected_findings = [item for item in snapshot["findings"] if any(project_id in json.dumps(item, ensure_ascii=False) for project_id in selected_ids)]
+        print_json({"portfolio": snapshot["portfolio"], "projects": selected, "artifacts": selected_artifacts, "dependencies": selected_dependencies, "relationships": selected_relationships, "source_of_truth": selected_rules, "findings": selected_findings, "snapshot_id": snapshot["snapshot_id"]})
     elif action == "validate": print_json({"valid": no_absolute_paths(snapshot), "snapshot_id": snapshot["snapshot_id"], "findings": snapshot["findings"]})
     elif action == "handoff":
         if getattr(args, "preflight", None):
@@ -1091,6 +1101,8 @@ def parser() -> argparse.ArgumentParser:
             child.add_argument("--project", help="filter relationships touching a project")
             child.add_argument("--relationship-type", help="filter by relationship_type")
             child.add_argument("--relationship-status", help="filter by lifecycle status")
+        if name == "context":
+            child.add_argument("--project", help="scope context to a project")
         if name == "handoff":
             child.add_argument("--preflight", help="read a saved preflight evidence report")
             child.add_argument("--format", choices=("json", "markdown"), default="json")

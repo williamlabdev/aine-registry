@@ -113,6 +113,15 @@ aine relationships --root /path/to/workspace --relationship-status planned
 Snapshots expose the same records under `relationships`; the original
 `dependencies` collection remains available for compatibility.
 
+Build a scoped agent context bundle with:
+
+```bash
+aine context --root /path/to/workspace --project checkout-service
+```
+
+The result includes the selected project, its artifacts, touching dependencies
+and relationships, related source-of-truth rules, findings, and snapshot ID.
+
 Preflight is read-only and reports matched projects, affected projects,
 source-of-truth rules, suggested validation commands, and unresolved changes:
 

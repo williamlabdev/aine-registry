@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "aine-registry"
-version = "0.8.2"
+version = "0.8.3"
 description = "Read-only multi-root portfolio intelligence for AI-assisted software engineering"
 readme = "README.md"
 requires-python = ">=3.9"
