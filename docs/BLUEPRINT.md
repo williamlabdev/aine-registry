@@ -147,6 +147,11 @@ The AsyncAPI adapter recognizes conventional AsyncAPI/event contract filenames
 and records the document version plus a lightweight channel count. It does not
 validate messages, brokers, bindings, or publish/subscribe compatibility.
 
+The deployment adapter inventories Dockerfiles, Compose descriptors, Helm
+charts, and common Kubernetes manifests as deployment artifacts. It is a
+static boundary adapter only: it never invokes Docker, Helm, kubectl, or a
+deployment provider.
+
 ## Extension boundaries
 
 The public core should remain generic. Project-specific business metadata, source-of-truth rules, service catalogs, deployment providers, enforced policy engines, agent execution, and hosted storage belong in adapters or higher-level control-plane components. The public core only evaluates the small, portable advisory policy contract described above.

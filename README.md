@@ -174,6 +174,11 @@ AsyncAPI JSON/YAML files named `asyncapi.*` or `events.*` are registered as
 section are present. The adapter records version and a lightweight channel
 count; event semantics and broker validation remain outside the registry core.
 
+Deployment descriptors are also inventoried: Dockerfiles, Compose files,
+Helm `Chart.yaml`, and common Kubernetes manifests become `deployment`
+artifacts with a deployment format/kind. AINE does not execute Docker, Helm,
+or kubectl and does not infer that a deployment succeeded.
+
 For example, impact analysis against live workspace roots currently uses:
 
 ```bash

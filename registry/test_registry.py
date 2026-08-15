@@ -163,6 +163,23 @@ class MultiRootRegistryTests(unittest.TestCase):
             self.assertEqual(contract["contract"]["format"], "asyncapi")
             self.assertEqual(contract["contract"]["version"], "3.0.0")
 
+    def test_deployment_adapter_registers_docker_and_kubernetes_artifacts(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp) / "workspace"
+            make_git_project(root / "service", "https://example.test/service.git", {
+                "Dockerfile": "FROM python:3.12\nCMD [\"python\", \"-m\", \"service\"]\n",
+                "deploy/service.yaml": "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: service\n",
+            })
+            snapshot = registry.discover([root], excluded_names=set())
+            docker = next(item for item in snapshot["artifacts"] if item["path"] == "Dockerfile")
+            kubernetes = next(item for item in snapshot["artifacts"] if item["path"] == "deploy/service.yaml")
+            self.assertEqual(docker["role"], "deployment")
+            self.assertEqual(docker["kind"], "dockerfile")
+            self.assertEqual(docker["deployment"]["format"], "docker")
+            self.assertEqual(kubernetes["kind"], "kubernetes_manifest")
+            report = registry.preflight(snapshot, ["service/deploy/service.yaml"], [root])
+            self.assertEqual(report["matched_artifacts"][0]["artifact_id"], kubernetes["artifact_id"])
+
     def test_preflight_cli_accepts_change_after_subcommand(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp) / "workspace"

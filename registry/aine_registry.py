@@ -43,6 +43,7 @@ API_CONTRACT_NAMES = {
     "swagger.json", "swagger.yaml", "swagger.yml",
 }
 ASYNCAPI_CONTRACT_NAMES = {"asyncapi.json", "asyncapi.yaml", "asyncapi.yml", "events.yaml", "events.yml"}
+DEPLOYMENT_NAMES = {"docker-compose.yml", "docker-compose.yaml", "compose.yml", "compose.yaml", "chart.yaml"}
 PROJECT_MANIFEST = Path(".aine/registry.json")
 GENERATED_MARKERS = ("generated", "_gen.", ".generated.", "SYNC_STAMP")
 SCAN_SKIP_DIRS = {"data", "media", "models", "checkpoints", "logs", "reports", "fixtures", "vendor", "third_party"}
@@ -285,6 +286,28 @@ def asyncapi_metadata(path: Path) -> dict[str, Any] | None:
     return {"format": "asyncapi", "version": version, "channel_count": channel_count}
 
 
+def deployment_metadata(path: Path) -> dict[str, str] | None:
+    """Recognize common deployment descriptors without executing their tools."""
+    name = path.name.lower()
+    if name == "dockerfile" or name.startswith("dockerfile."):
+        return {"format": "docker", "kind": "dockerfile"}
+    if name in {"docker-compose.yml", "docker-compose.yaml", "compose.yml", "compose.yaml"}:
+        text = read_text(path, 200_000)
+        if re.search(r"(?:^|\n)\s*(?:services|version)\s*:", text):
+            return {"format": "docker-compose", "kind": "compose"}
+    if name == "chart.yaml":
+        text = read_text(path, 100_000)
+        if re.search(r"(?:^|\n)\s*apiVersion\s*:\s*[^\s#]+", text) and re.search(r"(?:^|\n)\s*name\s*:\s*[^\s#]+", text):
+            return {"format": "helm", "kind": "helm_chart"}
+    if path.suffix.lower() in {".yaml", ".yml"}:
+        text = read_text(path, 200_000)
+        api_match = re.search(r"(?:^|\n)\s*apiVersion\s*:\s*([^\s#]+)", text)
+        kind_match = re.search(r"(?:^|\n)\s*kind\s*:\s*([^\s#]+)", text)
+        if api_match and kind_match and kind_match.group(1) in {"Deployment", "StatefulSet", "DaemonSet", "Service", "Job", "CronJob", "Ingress", "ConfigMap", "Secret"}:
+            return {"format": "kubernetes", "kind": "kubernetes_manifest"}
+    return None
+
+
 def artifact_records(root: Path, workspace_root: Path, pid: str, root_id: str) -> list[dict[str, Any]]:
     records: list[dict[str, Any]] = []
     for current, dirs, files in os.walk(root):
@@ -294,7 +317,8 @@ def artifact_records(root: Path, workspace_root: Path, pid: str, root_id: str) -
             contract = openapi_metadata(path)
             protobuf = protobuf_metadata(path)
             asyncapi = asyncapi_metadata(path)
-            if filename not in ARTIFACT_NAMES and not any(marker in filename for marker in GENERATED_MARKERS) and contract is None and protobuf is None and asyncapi is None: continue
+            deployment = deployment_metadata(path)
+            if filename not in ARTIFACT_NAMES and not any(marker in filename for marker in GENERATED_MARKERS) and contract is None and protobuf is None and asyncapi is None and deployment is None: continue
             try:
                 if path.stat().st_size > 2_000_000: continue
             except OSError:
@@ -302,14 +326,16 @@ def artifact_records(root: Path, workspace_root: Path, pid: str, root_id: str) -
             role = "generated" if any(marker in filename for marker in GENERATED_MARKERS) else "source"
             if filename in {"SYNC_STAMP", "specs-manifest.json"}: role = "provenance"
             if contract or protobuf or asyncapi: role = "schema"
+            if deployment: role = "deployment"
             aid = f"artifact.{root_id}.{pid}.{path_rel.replace('/', '.').replace('-', '_')}"
             records.append({
                 "artifact_id": aid, "project_id": pid, "root_id": root_id, "path": path_rel,
                 "workspace_path": f"{rel(workspace_root, root)}/{path_rel}", "artifact_type": path.suffix.lstrip(".") or "file",
-                "kind": "openapi_contract" if contract else ("protobuf_contract" if protobuf else ("asyncapi_contract" if asyncapi else (path.suffix.lstrip(".") or "file"))), "role": role, "status": "present", "content": file_hash(path),
+                "kind": "openapi_contract" if contract else ("protobuf_contract" if protobuf else ("asyncapi_contract" if asyncapi else (deployment["kind"] if deployment else (path.suffix.lstrip(".") or "file")))), "role": role, "status": "present", "content": file_hash(path),
                 "generated": role in {"generated", "provenance"}, "source_of_truth": None,
                 "provenance": {"status": "UNKNOWN"}, "consumers": [], "evidence": [f"{rel(workspace_root, root)}/{path_rel}"],
                 **({"contract": contract or protobuf or asyncapi} if contract or protobuf or asyncapi else {}),
+                **({"deployment": deployment} if deployment else {}),
             })
             if len(records) >= MAX_ARTIFACTS_PER_PROJECT: return sorted(records, key=lambda item: item["artifact_id"])
     return sorted(records, key=lambda item: item["artifact_id"])
