@@ -1,0 +1,64 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aine.dev/schemas/registry.v1.schema.json",
+  "title": "AINE Registry Snapshot v1",
+  "type": "object",
+  "required": ["schema", "snapshot_id", "portfolio", "projects", "repositories", "checkouts", "artifacts", "dependencies", "source_of_truth"],
+  "properties": {
+    "schema": {"const": "aine.registry.v1"},
+    "snapshot_id": {"type": ["string", "null"]},
+    "portfolio": {"$ref": "#/$defs/portfolio"},
+    "projects": {"type": "array", "items": {"$ref": "#/$defs/project"}},
+    "repositories": {"type": "array", "items": {"type": "object"}},
+    "checkouts": {"type": "array", "items": {"type": "object"}},
+    "artifacts": {"type": "array", "items": {"$ref": "#/$defs/artifact"}},
+    "dependencies": {"type": "array", "items": {"$ref": "#/$defs/dependency"}},
+    "source_of_truth": {"type": "array", "items": {"type": "object"}}
+  },
+  "$defs": {
+    "portfolio": {
+      "type": "object",
+      "required": ["portfolio_id", "workspace_roots"],
+      "properties": {
+        "portfolio_id": {"type": "string"},
+        "workspace_roots": {"type": "array", "items": {"type": "object", "required": ["root_id", "path"]}}
+      }
+    },
+    "project": {
+      "type": "object",
+      "required": ["project_id", "root_id", "repository_id", "checkout_id", "path", "kind"],
+      "properties": {
+        "project_id": {"type": "string"},
+        "root_id": {"type": "string"},
+        "repository_id": {"type": "string"},
+        "checkout_id": {"type": "string"},
+        "path": {"type": "string"},
+        "kind": {"type": "string"}
+      }
+    },
+    "artifact": {
+      "type": "object",
+      "required": ["artifact_id", "project_id", "root_id", "path", "role", "status"],
+      "properties": {
+        "artifact_id": {"type": "string"},
+        "project_id": {"type": "string"},
+        "root_id": {"type": "string"},
+        "path": {"type": "string"},
+        "role": {"type": "string"},
+        "status": {"type": "string"}
+      }
+    },
+    "dependency": {
+      "type": "object",
+      "required": ["dependency_id", "source", "target", "kind", "scope", "evidence"],
+      "properties": {
+        "dependency_id": {"type": "string"},
+        "source": {"type": "object"},
+        "target": {"type": "object"},
+        "kind": {"type": "string"},
+        "scope": {"enum": ["intra_root", "cross_root", "external", "unknown"]},
+        "evidence": {"type": "array", "items": {"type": "string"}}
+      }
+    }
+  }
+}
