@@ -62,6 +62,12 @@ Run the test suite:
 python3 -m unittest discover -s registry -p 'test_*.py' -v
 ```
 
+## Project documents
+
+- [Vision](docs/VISION.md) — why the registry exists and what it will not do
+- [Roadmap](docs/ROADMAP.md) — released capabilities and planned milestones
+- [Blueprint](docs/BLUEPRINT.md) — public-core boundaries, data model, and runtime flow
+
 ## Public-core boundary
 
 This repository contains generic discovery and graph behavior only. Portfolio-specific project IDs, business metadata, source-of-truth seeds, customer data, local snapshots, and private evidence belong in a project adapter or private workspace configuration.

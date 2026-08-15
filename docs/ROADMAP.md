@@ -1,0 +1,57 @@
+# AINE Registry Roadmap
+
+This roadmap describes product outcomes, not promises of automatic support for every language or runtime.
+
+## v0.1 — Public Registry Core (released)
+
+- [x] Discover multiple workspace roots
+- [x] Identify Git projects, repositories, and checkouts
+- [x] Register selected source and generated artifacts
+- [x] Infer evidence-backed package, filesystem, and runtime references
+- [x] Classify dependency scope, including cross-root relationships
+- [x] Export portable snapshots with local-path redaction
+- [x] Query dependency graphs and transitive impact
+- [x] Provide a versioned JSON Schema
+- [x] Keep discovery read-only and dependency-free
+
+## v0.2 — Developer Workflow
+
+- [ ] Stable `aine` executable wrapper
+- [ ] Project-local registry manifest for explicit metadata
+- [ ] Generic source-of-truth declarations
+- [ ] Artifact provenance and consumer declarations
+- [ ] Human-readable impact reports
+- [ ] Better diagnostics for unresolved and contradictory relationships
+- [ ] Public examples for a small polyrepo system
+
+## v0.3 — Agent Preflight
+
+- [ ] `preflight` command for a proposed file or change set
+- [ ] Agent context export with project boundary and affected components
+- [ ] Required validation plan derived from registry metadata
+- [ ] Risk annotations and human-review requirements
+- [ ] Handoff and evidence record formats
+
+## v0.4 — Integrations
+
+- [ ] GitHub Actions integration
+- [ ] OpenAPI, protobuf, and AsyncAPI adapters
+- [ ] Docker, Helm, and Kubernetes deployment adapters
+- [ ] CI test and artifact provenance adapters
+- [ ] Pluggable service and event relationship providers
+
+## Later — Control Plane
+
+- [ ] Policy evaluation and approval workflows
+- [ ] Team ownership and RBAC
+- [ ] Audit evidence storage
+- [ ] Hosted or self-hosted portfolio views
+- [ ] Enterprise retention and compliance integrations
+
+## Release principles
+
+1. Do not hide uncertainty to improve graph completeness metrics.
+2. Do not add a hosted dependency to the local core without a clear adapter boundary.
+3. Prefer evidence and explainability over speculative semantic inference.
+4. Every new relationship type needs fixtures and regression tests.
+5. Keep business-specific metadata out of the public core.
