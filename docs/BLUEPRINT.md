@@ -157,6 +157,15 @@ declared jobs as provenance artifacts. It does not execute workflows, inspect
 secret values, or convert a workflow definition into evidence that a check
 passed; runtime check results remain external evidence.
 
+## Explicit relationship provider
+
+The manifest `relationships` array is the first provider boundary for service
+and event relationships that cannot be safely inferred. It emits the same
+evidence-backed graph edge as a dependency, while retaining an optional
+`relationship_type` such as `event_consumer`, a lifecycle `status`, and a
+`strength`. This keeps provider-specific discovery outside the core graph model
+without inventing runtime relationships from filenames or prose.
+
 ## Extension boundaries
 
 The public core should remain generic. Project-specific business metadata, source-of-truth rules, service catalogs, deployment providers, enforced policy engines, agent execution, and hosted storage belong in adapters or higher-level control-plane components. The public core only evaluates the small, portable advisory policy contract described above.

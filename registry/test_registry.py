@@ -111,10 +111,12 @@ class MultiRootRegistryTests(unittest.TestCase):
             (consumer / ".aine").mkdir()
             (consumer / ".aine" / "registry.json").write_text(json.dumps({
                 "dependencies": [{"target": "workspace.provider", "kind": "runtime_api"}],
+                "relationships": [{"target": "workspace.provider", "relationship_type": "event_consumer", "status": "planned"}],
             }), encoding="utf-8")
             snapshot = registry.discover([root], excluded_names=set())
             self.assertTrue(any(a["artifact_id"] == "provider-api" for a in snapshot["artifacts"]))
             self.assertTrue(any(e["target"]["project_id"] == "workspace.provider" and e["kind"] == "runtime_api" for e in snapshot["dependencies"]))
+            self.assertTrue(any(e.get("relationship_type") == "event_consumer" and e["status"] == "planned" for e in snapshot["dependencies"]))
             report = registry.preflight(snapshot, ["provider/api.yaml"], [root])
             self.assertEqual([a["artifact_id"] for a in report["matched_artifacts"]], ["provider-api"])
             self.assertIn("workspace.consumer", {p["project_id"] for p in report["affected_projects"]})

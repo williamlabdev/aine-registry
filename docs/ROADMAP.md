@@ -66,10 +66,12 @@ This roadmap describes product outcomes, not promises of automatic support for e
 - [x] Lightweight AsyncAPI contract adapter
 - [x] Lightweight Docker, Helm, and Kubernetes deployment adapter
 - [x] GitHub Actions workflow provenance adapter
-- [ ] Pluggable service and event relationship providers
-- [ ] Docker, Helm, and Kubernetes deployment adapters
-- [ ] CI test and artifact provenance adapters
-- [ ] Pluggable service and event relationship providers
+
+## v0.8 — Explicit Relationship Provider (released)
+
+- [x] Manifest `relationships` declarations
+- [x] Typed relationship kind, status, strength, and evidence
+- [x] Service/event relationship edges represented in the existing graph
 
 ## Later — Control Plane
 

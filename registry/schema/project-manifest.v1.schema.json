@@ -50,6 +50,21 @@
         "additionalProperties": true
       }
     },
+    "relationships": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["target"],
+        "properties": {
+          "target": {"type": "string"},
+          "relationship_type": {"type": "string"},
+          "kind": {"type": "string"},
+          "strength": {"type": "string"},
+          "status": {"type": "string"}
+        },
+        "additionalProperties": true
+      }
+    },
     "source_of_truth": {
       "type": "array",
       "items": {"type": "object", "additionalProperties": true}

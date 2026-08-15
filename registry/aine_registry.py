@@ -417,16 +417,20 @@ def explicit_manifest_records(project: dict[str, Any], project_root: Path, works
             "evidence": [evidence],
         })
     dependencies: list[dict[str, Any]] = []
-    for item in data.get("dependencies", []):
+    declared_relationships = list(data.get("dependencies", [])) + list(data.get("relationships", []))
+    for item in declared_relationships:
         if not isinstance(item, dict) or not item.get("target"):
             continue
         target_value = str(item["target"])
         target_project = next((p for p in projects if target_value in {p["project_id"], p["name"], p["path"]}), None)
         target_id = target_project["project_id"] if target_project else (target_value if target_value.startswith("external:") else f"external:{target_value}")
-        dependencies.append(make_edge(
-            project["project_id"], target_id, str(item.get("kind", "declared")), str(item.get("strength", "required")), "declared",
+        edge = make_edge(
+            project["project_id"], target_id, str(item.get("kind", item.get("relationship_type", "declared"))), str(item.get("strength", "required")), str(item.get("status", "declared")),
             evidence, {"manifest": evidence, "target": target_value}, projects, target_project,
-        ))
+        )
+        if item.get("relationship_type"):
+            edge["relationship_type"] = str(item["relationship_type"])
+        dependencies.append(edge)
     source_rules: list[dict[str, Any]] = []
     for item in data.get("source_of_truth", []):
         if not isinstance(item, dict):

@@ -97,6 +97,11 @@ cannot be safely inferred from code or configuration:
 The v0.3 manifest is JSON to keep the core dependency-free. YAML adapters are
 planned for a future release.
 
+For typed service or event relationships that static discovery cannot infer,
+the manifest also accepts a `relationships` array. Each entry names a target
+and may declare `relationship_type`, `status`, and `strength`; the resulting
+edge retains the manifest as evidence.
+
 Preflight is read-only and reports matched projects, affected projects,
 source-of-truth rules, suggested validation commands, and unresolved changes:
 
