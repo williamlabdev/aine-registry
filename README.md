@@ -43,6 +43,19 @@ python3 registry/aine_registry.py --snapshot /tmp/aine-portfolio.json impact --p
 python3 registry/aine_registry.py --snapshot /tmp/aine-portfolio.json validate
 ```
 
+The current release is invoked through the Python script. The shorthand commands
+`aine scan`, `aine impact`, and `aine preflight` are planned interfaces, not
+installed commands in v0.1.0. `preflight` is not implemented yet.
+
+For example, impact analysis against live workspace roots currently uses:
+
+```bash
+python3 registry/aine_registry.py \
+  --root /path/to/core \
+  --root /path/to/side-projects \
+  impact --project checkout-service
+```
+
 Run the test suite:
 
 ```bash
