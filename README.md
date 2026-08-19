@@ -265,6 +265,27 @@ aine view --snapshot registry.json --output portfolio.html
 The HTML output is dependency-free and contains only portable project metadata;
 serve it from any static host when a hosted view is desired.
 
+For a local self-hosted view with read-only JSON routes:
+
+```bash
+aine serve --snapshot registry.json --store .aine/evidence --host 127.0.0.1 --port 8080
+```
+
+The server exposes `/`, `/api/snapshot`, and `/api/evidence`. It uses only the
+Python standard library and binds to loopback by default.
+
+Audit bundles and retention manifests are portable exports:
+
+```bash
+aine evidence export --store .aine/evidence --output audit-bundle.json
+aine evidence retention --store .aine/evidence --retain-days 365 \
+  --as-of 2026-08-19T00:00:00+00:00 --output retention.json
+```
+
+Retention is deliberately review-only: AINE never deletes records or claims
+compliance. External archive, SIEM, GRC, and enterprise retention adapters can
+consume these exports.
+
 Projects can declare portable ownership and delegated teams:
 
 ```json

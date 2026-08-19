@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import html
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import os
 import re
@@ -1162,6 +1163,35 @@ def command_evidence(args: argparse.Namespace) -> int:
             print_json(load_store_record(target)["record"])
         except (OSError, ValueError, json.JSONDecodeError) as exc:
             print(f"could not read evidence: {exc}", file=sys.stderr); return 2
+    elif args.evidence_action in {"export", "retention"}:
+        try:
+            entries = list_store_records(store_root)
+            valid_records = []
+            for entry in entries:
+                if entry.get("status") == "invalid":
+                    continue
+                envelope = load_store_record(store_root / entry["path"])
+                valid_records.append(envelope["record"])
+            if args.evidence_action == "export":
+                payload = {"schema": "aine.audit.bundle.v1", "record_ids": [record_digest(record) for record in valid_records], "records": valid_records, "invalid_records": [entry for entry in entries if entry.get("status") == "invalid"], "read_only": True}
+            else:
+                as_of = datetime.fromisoformat(args.as_of.replace("Z", "+00:00"))
+                cutoff = as_of.timestamp() - (args.retain_days * 86400)
+                retention_records = []
+                for record in valid_records:
+                    observed = record.get("observed_at") or record.get("created_at") or record.get("workspace", {}).get("observed_at")
+                    observed_time = None
+                    if isinstance(observed, str):
+                        try: observed_time = datetime.fromisoformat(observed.replace("Z", "+00:00")).timestamp()
+                        except ValueError: observed_time = None
+                    retention_records.append({"record_id": record_digest(record), "status": "review" if observed_time is not None and observed_time < cutoff else ("keep" if observed_time is not None else "unknown"), "observed_at": observed})
+                payload = {"schema": "aine.retention.manifest.v1", "as_of": args.as_of, "retain_days": args.retain_days, "records": retention_records, "read_only": True}
+            if args.output:
+                output = Path(args.output).expanduser().resolve(); output.parent.mkdir(parents=True, exist_ok=True); output.write_text(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8"); print_json({"status": "written", "output": output.name, "records": len(payload["records"])})
+            else:
+                print_json(payload)
+        except (OSError, ValueError, json.JSONDecodeError) as exc:
+            print(f"could not process evidence store: {exc}", file=sys.stderr); return 2
     return 0
 
 
@@ -1207,6 +1237,50 @@ def command_view(args: argparse.Namespace) -> int:
         return 0
     except (OSError, ValueError, json.JSONDecodeError) as exc:
         print(f"could not render portfolio view: {exc}", file=sys.stderr); return 2
+
+
+def command_serve(args: argparse.Namespace) -> int:
+    try:
+        snapshot = json.loads(Path(args.snapshot).expanduser().read_text(encoding="utf-8"))
+        errors = snapshot_validation_errors(snapshot)
+        if errors:
+            raise ValueError("invalid snapshot: " + "; ".join(errors))
+        if not no_absolute_paths(snapshot):
+            raise ValueError("snapshot contains an absolute local path")
+        store_root = Path(args.store).expanduser().resolve() if args.store else None
+        records = lambda: list_store_records(store_root) if store_root else []
+        document = portfolio_html(snapshot).encode("utf-8")
+        snapshot_json = json.dumps(snapshot, ensure_ascii=False, indent=2, sort_keys=True).encode("utf-8")
+
+        class Handler(BaseHTTPRequestHandler):
+            def do_GET(self) -> None:
+                if self.path == "/":
+                    content_type, payload = "text/html; charset=utf-8", document
+                elif self.path == "/api/snapshot":
+                    content_type, payload = "application/json; charset=utf-8", snapshot_json
+                elif self.path == "/api/evidence":
+                    content_type, payload = "application/json; charset=utf-8", json.dumps(records(), ensure_ascii=False, indent=2, sort_keys=True).encode("utf-8")
+                else:
+                    self.send_error(404, "not found")
+                    return
+                self.send_response(200)
+                self.send_header("Content-Type", content_type)
+                self.send_header("Content-Length", str(len(payload)))
+                self.send_header("Cache-Control", "no-store")
+                self.end_headers()
+                self.wfile.write(payload)
+
+            def log_message(self, format: str, *values: Any) -> None:
+                return
+
+        if args.check:
+            print_json({"status": "ready", "routes": ["/", "/api/snapshot", "/api/evidence"], "host": args.host, "port": args.port, "records": len(records())})
+            return 0
+        server = ThreadingHTTPServer((args.host, args.port), Handler)
+        print_json({"status": "serving", "host": args.host, "port": server.server_port, "routes": ["/", "/api/snapshot", "/api/evidence"]})
+        server.serve_forever()
+    except (OSError, ValueError, json.JSONDecodeError) as exc:
+        print(f"could not serve portfolio: {exc}", file=sys.stderr); return 2
 
 
 def authorization_value_matches(actual: Any, expected: Any) -> bool:
@@ -1475,6 +1549,8 @@ def command(args: argparse.Namespace) -> int:
         return command_evidence(args)
     if args.action == "view":
         return command_view(args)
+    if args.action == "serve":
+        return command_serve(args)
     if args.action == "handoff" and getattr(args, "preflight", None):
         try:
             report = json.loads(Path(args.preflight).expanduser().read_text(encoding="utf-8"))
@@ -1663,9 +1739,23 @@ def parser() -> argparse.ArgumentParser:
     evidence_get = evidence_sub.add_parser("get", help="read and verify a stored record")
     evidence_get.add_argument("--id", required=True, help="record ID or digest")
     evidence_get.add_argument("--store", required=True, help="local evidence store directory")
+    evidence_export = evidence_sub.add_parser("export", help="export a portable audit bundle")
+    evidence_export.add_argument("--store", required=True, help="local evidence store directory")
+    evidence_export.add_argument("--output", help="write the bundle")
+    evidence_retention = evidence_sub.add_parser("retention", help="produce a read-only retention manifest")
+    evidence_retention.add_argument("--store", required=True, help="local evidence store directory")
+    evidence_retention.add_argument("--retain-days", type=int, required=True, help="retention window for review")
+    evidence_retention.add_argument("--as-of", required=True, help="ISO-8601 evaluation time")
+    evidence_retention.add_argument("--output", help="write the manifest")
     view = sub.add_parser("view", help="render a portable snapshot as static HTML")
     view.add_argument("--snapshot", required=True, help="portable registry snapshot JSON")
     view.add_argument("--output", required=True, help="HTML output path")
+    serve = sub.add_parser("serve", help="serve a portable snapshot with the stdlib HTTP server")
+    serve.add_argument("--snapshot", required=True, help="portable registry snapshot JSON")
+    serve.add_argument("--store", help="optional local evidence store directory")
+    serve.add_argument("--host", default="127.0.0.1", help="bind host; default is loopback")
+    serve.add_argument("--port", type=int, default=8080, help="bind port")
+    serve.add_argument("--check", action="store_true", help="validate the server configuration without starting it")
     dependency = sub.add_parser("dependency"); dependency.add_argument("subcommand", nargs="?")
     sot = sub.add_parser("source-of-truth"); sot.add_argument("domain")
     impact_cmd = sub.add_parser("impact"); impact_cmd.add_argument("target", nargs="?"); impact_cmd.add_argument("--project"); impact_cmd.add_argument("--path"); impact_cmd.add_argument("--artifact"); add_workspace_options(impact_cmd)

@@ -128,6 +128,15 @@ HTML view. This is the self-hosting boundary: the generated file can be served
 by any static host, while the registry itself does not run a web server, persist
 application state, or upload portfolio data.
 
+An optional standard-library server exposes the same static view plus read-only
+snapshot and evidence routes for self-hosted use. It binds to loopback by
+default and does not provide authentication, mutation, or hosted persistence.
+
+The evidence store also exports an audit bundle and a retention manifest. These
+are interoperability contracts for external archive, SIEM, GRC, and enterprise
+retention adapters. Retention evaluation is review-only; the core never deletes
+records or asserts regulatory compliance.
+
 ## Advisory policy evaluation
 
 Project-local policy is declarative metadata consumed during preflight. The

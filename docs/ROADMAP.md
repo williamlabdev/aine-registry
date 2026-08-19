@@ -110,11 +110,17 @@ This roadmap describes product outcomes, not promises of automatic support for e
 - [x] `aine evidence store`, `list`, and `get` commands
 - [x] Tamper detection without runtime dependencies
 
+## v1.3 — Self-hosted Service and Compliance Export (released)
+
+- [x] Stdlib-only self-hosted portfolio server
+- [x] Read-only snapshot and evidence API routes
+- [x] Portable audit bundle export
+- [x] Portable retention manifest with review-only semantics
+
 ## Later — Control Plane
 
-- [x] Static self-hostable portfolio view export
-- [ ] Hosted portfolio service
-- [ ] Enterprise retention and compliance integrations
+- [ ] Managed hosted portfolio service
+- [ ] Provider-specific enterprise retention and compliance adapters
 
 ## Release principles
 

@@ -393,6 +393,10 @@ class MultiRootRegistryTests(unittest.TestCase):
             self.assertEqual(json.loads(listed.stdout)[0]["record_id"], stored_data["record_id"])
             fetched = subprocess.run([sys.executable, str(Path(__file__).parent / "aine_registry.py"), "evidence", "get", "--id", stored_data["record_id"], "--store", str(store)], capture_output=True, text=True, check=True)
             self.assertEqual(json.loads(fetched.stdout), record)
+            exported = subprocess.run([sys.executable, str(Path(__file__).parent / "aine_registry.py"), "evidence", "export", "--store", str(store)], capture_output=True, text=True, check=True)
+            self.assertEqual(json.loads(exported.stdout)["schema"], "aine.audit.bundle.v1")
+            retention = subprocess.run([sys.executable, str(Path(__file__).parent / "aine_registry.py"), "evidence", "retention", "--store", str(store), "--retain-days", "30", "--as-of", "2026-08-19T00:00:00+00:00"], capture_output=True, text=True, check=True)
+            self.assertEqual(json.loads(retention.stdout)["schema"], "aine.retention.manifest.v1")
             stored_path = store / f"{stored_data['record_id'].removeprefix('sha256:')}.json"
             tampered = json.loads(stored_path.read_text(encoding="utf-8"))
             tampered["record"]["claims"]["policy_status"] = "fail"
@@ -414,6 +418,8 @@ class MultiRootRegistryTests(unittest.TestCase):
             rendered = output.read_text(encoding="utf-8")
             self.assertIn("workspace.service", rendered)
             self.assertNotIn(str(base), rendered)
+            served = subprocess.run([sys.executable, str(Path(__file__).parent / "aine_registry.py"), "serve", "--snapshot", str(snapshot_path), "--port", "0", "--check"], capture_output=True, text=True, check=True)
+            self.assertEqual(json.loads(served.stdout)["status"], "ready")
 
     def test_remote_credentials_are_not_exported(self):
         self.assertEqual(registry.normalized_remote("https://token:secret@example.test/org/repo.git"), "https://example.test/org/repo")
