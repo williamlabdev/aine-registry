@@ -112,7 +112,8 @@ This roadmap describes product outcomes, not promises of automatic support for e
 
 ## Later — Control Plane
 
-- [ ] Hosted or self-hosted portfolio views
+- [x] Static self-hostable portfolio view export
+- [ ] Hosted portfolio service
 - [ ] Enterprise retention and compliance integrations
 
 ## Release principles

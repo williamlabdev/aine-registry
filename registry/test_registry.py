@@ -400,6 +400,21 @@ class MultiRootRegistryTests(unittest.TestCase):
             invalid = subprocess.run([sys.executable, str(Path(__file__).parent / "aine_registry.py"), "evidence", "list", "--store", str(store)], capture_output=True, text=True, check=True)
             self.assertEqual(json.loads(invalid.stdout)[0]["status"], "invalid")
 
+    def test_static_portfolio_view_uses_portable_snapshot(self):
+        with tempfile.TemporaryDirectory() as temp:
+            base = Path(temp)
+            root = base / "workspace"
+            make_git_project(root / "service", "https://example.test/service.git")
+            snapshot = registry.discover([root], excluded_names=set())
+            snapshot_path = base / "snapshot.json"
+            output = base / "portfolio.html"
+            snapshot_path.write_text(json.dumps(snapshot), encoding="utf-8")
+            result = subprocess.run([sys.executable, str(Path(__file__).parent / "aine_registry.py"), "view", "--snapshot", str(snapshot_path), "--output", str(output)], capture_output=True, text=True, check=True)
+            self.assertEqual(json.loads(result.stdout)["format"], "html")
+            rendered = output.read_text(encoding="utf-8")
+            self.assertIn("workspace.service", rendered)
+            self.assertNotIn(str(base), rendered)
+
     def test_remote_credentials_are_not_exported(self):
         self.assertEqual(registry.normalized_remote("https://token:secret@example.test/org/repo.git"), "https://example.test/org/repo")
 

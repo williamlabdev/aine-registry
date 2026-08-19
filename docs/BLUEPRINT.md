@@ -121,6 +121,13 @@ digest and expose tampered files as invalid. The store is intentionally
 dependency-free and local. Hosted storage, retention policy enforcement, and
 compliance export remain outside the public core.
 
+## Static portfolio view
+
+The core can render a portable registry snapshot into a dependency-free static
+HTML view. This is the self-hosting boundary: the generated file can be served
+by any static host, while the registry itself does not run a web server, persist
+application state, or upload portfolio data.
+
 ## Advisory policy evaluation
 
 Project-local policy is declarative metadata consumed during preflight. The

@@ -256,6 +256,15 @@ The store verifies each record's digest on read and reports tampered records as
 invalid. It has no database or hosted-service dependency and only writes to the
 explicit store directory supplied by the caller.
 
+Portable snapshots can be rendered as a static self-hostable portfolio view:
+
+```bash
+aine view --snapshot registry.json --output portfolio.html
+```
+
+The HTML output is dependency-free and contains only portable project metadata;
+serve it from any static host when a hosted view is desired.
+
 Projects can declare portable ownership and delegated teams:
 
 ```json
