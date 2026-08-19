@@ -1,0 +1,24 @@
+{
+  "project": {
+    "owner": "product-team",
+    "ownership": {
+      "team": "product",
+      "owners": ["team:product"]
+    }
+  },
+  "dependencies": [
+    {
+      "target": "core.checkout-service",
+      "kind": "runtime_api",
+      "status": "active",
+      "strength": "required"
+    }
+  ],
+  "relationships": [
+    {
+      "target": "core.checkout-service",
+      "relationship_type": "service_client",
+      "status": "active"
+    }
+  ]
+}

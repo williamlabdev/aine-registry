@@ -1,0 +1,29 @@
+{
+  "project": {
+    "owner": "platform-team",
+    "ownership": {
+      "team": "platform",
+      "owners": ["team:platform"]
+    }
+  },
+  "artifacts": [
+    {
+      "id": "checkout-openapi",
+      "path": "openapi.yaml",
+      "role": "source",
+      "kind": "openapi_contract",
+      "source_of_truth": true,
+      "risk": "high",
+      "approval_required": true
+    }
+  ],
+  "source_of_truth": [
+    {
+      "domain": "checkout.api",
+      "authority": {
+        "project_id": "core.checkout-service",
+        "artifact": "checkout-openapi"
+      }
+    }
+  ]
+}

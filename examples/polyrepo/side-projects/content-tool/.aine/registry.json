@@ -1,0 +1,29 @@
+{
+  "project": {
+    "owner": "content-team",
+    "ownership": {
+      "team": "content",
+      "owners": ["team:content"]
+    }
+  },
+  "artifacts": [
+    {
+      "id": "generated-content",
+      "path": "generated/content.json",
+      "role": "generated",
+      "kind": "json",
+      "provenance": {
+        "status": "declared",
+        "source": "content-tool"
+      }
+    }
+  ],
+  "dependencies": [
+    {
+      "target": "core.checkout-service",
+      "kind": "runtime_api",
+      "status": "planned",
+      "strength": "optional"
+    }
+  ]
+}
