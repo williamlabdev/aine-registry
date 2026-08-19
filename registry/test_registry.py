@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+import shutil
 import tempfile
 import unittest
 from pathlib import Path
@@ -420,6 +421,21 @@ class MultiRootRegistryTests(unittest.TestCase):
             self.assertNotIn(str(base), rendered)
             served = subprocess.run([sys.executable, str(Path(__file__).parent / "aine_registry.py"), "serve", "--snapshot", str(snapshot_path), "--port", "0", "--check"], capture_output=True, text=True, check=True)
             self.assertEqual(json.loads(served.stdout)["status"], "ready")
+
+    def test_public_polyrepo_example_discovers_three_projects_and_cross_root_edge(self):
+        source = Path(__file__).parent.parent / "examples" / "polyrepo"
+        with tempfile.TemporaryDirectory() as temp:
+            example = Path(temp) / "polyrepo"
+            shutil.copytree(source, example)
+            subprocess.run(["sh", "setup.sh"], cwd=example, check=True, capture_output=True, text=True)
+            result = subprocess.run([
+                sys.executable, str(Path(__file__).parent / "aine_registry.py"), "discover",
+                "--root", str(example / "core"), "--root", str(example / "side-projects"),
+            ], capture_output=True, text=True, check=True)
+            snapshot = json.loads(result.stdout)
+            self.assertEqual({project["project_id"] for project in snapshot["projects"]}, {"core.checkout-service", "core.web-app", "side-projects.content-tool"})
+            self.assertTrue(any(edge["scope"] == "cross_root" for edge in snapshot["dependencies"]))
+            self.assertTrue(any(rule["domain"] == "checkout.api" for rule in snapshot["source_of_truth"]))
 
     def test_remote_credentials_are_not_exported(self):
         self.assertEqual(registry.normalized_remote("https://token:secret@example.test/org/repo.git"), "https://example.test/org/repo")

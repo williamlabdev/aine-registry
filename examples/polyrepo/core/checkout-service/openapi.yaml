@@ -1,0 +1,10 @@
+openapi: 3.0.3
+info:
+  title: Checkout Service
+  version: 1.0.0
+paths:
+  /checkout:
+    post:
+      responses:
+        '200':
+          description: Checkout accepted

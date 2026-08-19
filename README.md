@@ -379,6 +379,7 @@ python3 -m unittest discover -s registry -p 'test_*.py' -v
 
 - [Vision](docs/VISION.md) — why the registry exists and what it will not do
 - [Roadmap](docs/ROADMAP.md) — released capabilities and planned milestones
+- [Public polyrepo example](examples/polyrepo/README.md) — runnable multi-root fixture with cross-project relationships
 - [Blueprint](docs/BLUEPRINT.md) — public-core boundaries, data model, and runtime flow
 
 ## Public-core boundary

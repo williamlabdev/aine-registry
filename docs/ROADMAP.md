@@ -21,7 +21,7 @@ This roadmap describes product outcomes, not promises of automatic support for e
 - [x] Installable package metadata with no runtime dependencies
 - [x] Human-readable impact reports
 - [x] Better diagnostics for unresolved and contradictory relationships
-- [ ] Public examples for a small polyrepo system
+- [x] Public examples for a small polyrepo system
 
 ## v0.3 — Agent Preflight (released)
 
