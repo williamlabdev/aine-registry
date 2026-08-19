@@ -47,6 +47,7 @@ DEPLOYMENT_NAMES = {"docker-compose.yml", "docker-compose.yaml", "compose.yml", 
 PROJECT_MANIFEST = Path(".aine/registry.json")
 GENERATED_MARKERS = ("generated", "_gen.", ".generated.", "SYNC_STAMP")
 SCAN_SKIP_DIRS = {"data", "media", "models", "checkpoints", "logs", "reports", "fixtures", "vendor", "third_party"}
+IMPORT_SOURCE_EXTENSIONS = {".py", ".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs", ".go", ".rs"}
 MAX_ARTIFACTS_PER_PROJECT = 500
 LOCAL_PATH_RE = re.compile(r"^(?:/|[A-Za-z]:[\\/])")
 SOURCE_TRUTH_SEED: list[dict[str, object]] = []
@@ -526,6 +527,122 @@ def text_edges(root: Path, workspace_root: Path, pid: str, roots: list[Path], pr
     return sorted(edges, key=lambda item: item["dependency_id"])
 
 
+def import_candidates(base: Path, specifier: str, extensions: tuple[str, ...]) -> list[Path]:
+    target = base / specifier
+    return [target, *[Path(f"{target}{extension}") for extension in extensions], *[target / f"index{extension}" for extension in extensions], target / "__init__.py"]
+
+
+def resolve_import_path(source: Path, specifier: str, root: Path, language: str) -> Path | None:
+    if language == "python":
+        if specifier.startswith("."):
+            dots = len(specifier) - len(specifier.lstrip("."))
+            base = source.parent
+            for _ in range(max(0, dots - 1)):
+                base = base.parent
+            module = specifier[dots:].replace(".", "/")
+            candidates = import_candidates(base, module, (".py",))
+        else:
+            module = specifier.replace(".", "/")
+            candidates = import_candidates(root, module, (".py",)) + import_candidates(root / "src", module, (".py",))
+    elif language in {"javascript", "typescript"}:
+        if not specifier.startswith("."):
+            return None
+        candidates = import_candidates(source.parent, specifier, (".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs"))
+    elif language == "rust":
+        if specifier.startswith("crate::"):
+            module = specifier.removeprefix("crate::").replace("::", "/")
+            candidates = import_candidates(root / "src", module, (".rs",))
+        else:
+            candidates = import_candidates(root / "src", specifier.replace("::", "/"), (".rs",))
+    else:
+        return None
+    return next((candidate.resolve() for candidate in candidates if candidate.is_file()), None)
+
+
+def package_name(specifier: str) -> str:
+    if specifier.startswith("@"):
+        return "/".join(specifier.split("/")[:2])
+    return specifier.split("/")[0].split(".")[0]
+
+
+def module_import_records(root: Path, workspace_root: Path, project: dict[str, Any], roots: list[Path], projects_by_root: dict[str, dict[str, Any]], projects: list[dict[str, Any]], package_index: dict[str, str]) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    records: list[dict[str, Any]] = []
+    edges: list[dict[str, Any]] = []
+    patterns = {
+        "python": [
+            (re.compile(r"^\s*from\s+([.\w]+)\s+import\s+", re.MULTILINE), "static"),
+            (re.compile(r"^\s*import\s+([A-Za-z_][\w., ]*)", re.MULTILINE), "static"),
+        ],
+        "javascript": [
+            (re.compile(r"^\s*(?:import|export).*?from\s*[\"']([^\"']+)[\"']", re.MULTILINE), "static"),
+            (re.compile(r"^\s*import\s*[\"']([^\"']+)[\"']", re.MULTILINE), "static"),
+            (re.compile(r"\brequire\(\s*[\"']([^\"']+)[\"']\s*\)", re.MULTILINE), "static"),
+            (re.compile(r"\bimport\(\s*[\"']([^\"']+)[\"']\s*\)", re.MULTILINE), "dynamic"),
+        ],
+        "go": [(re.compile(r"\bimport\s*(?:\(\s*(.*?)\)|[\"']([^\"']+)[\"'])", re.DOTALL), "static")],
+        "rust": [
+            (re.compile(r"^\s*use\s+([A-Za-z_][\w:]*)", re.MULTILINE), "static"),
+            (re.compile(r"^\s*extern\s+crate\s+([A-Za-z_][\w]*)", re.MULTILINE), "static"),
+            (re.compile(r"^\s*mod\s+([A-Za-z_][\w]*)\s*;", re.MULTILINE), "static"),
+        ],
+    }
+    for current, dirs, files in os.walk(root):
+        dirs[:] = [directory for directory in dirs if directory not in DEFAULT_IGNORES and directory not in SCAN_SKIP_DIRS]
+        for filename in files:
+            path = Path(current) / filename
+            suffix = path.suffix.lower()
+            if suffix not in IMPORT_SOURCE_EXTENSIONS:
+                continue
+            language = "python" if suffix == ".py" else ("typescript" if suffix in {".ts", ".tsx"} else ("javascript" if suffix in {".js", ".jsx", ".mjs", ".cjs"} else ("rust" if suffix == ".rs" else suffix.lstrip("."))))
+            text = read_text(path, 300_000)
+            imports: list[tuple[str, str]] = []
+            pattern_language = "javascript" if language == "typescript" else language
+            for pattern, import_kind in patterns.get(pattern_language, []):
+                for match in pattern.finditer(text):
+                    values = [value for value in match.groups() if value]
+                    if language == "python":
+                        values = [part.strip() for value in values for part in value.split(",") if part.strip()]
+                    if language == "go" and values and "\n" in values[0]:
+                        values = re.findall(r"[\"']([^\"']+)[\"']", values[0])
+                    imports.extend((value, import_kind) for value in values)
+            seen: set[tuple[str, str]] = set()
+            for specifier, import_kind in imports:
+                if (specifier, import_kind) in seen:
+                    continue
+                seen.add((specifier, import_kind))
+                local_target = resolve_import_path(path, specifier, root, language)
+                target_project = project_for_path(local_target, roots, projects_by_root) if local_target else None
+                resolution = "local" if local_target else "unresolved"
+                target_path = rel(target_project_root, local_target) if local_target and (target_project_root := next((candidate for candidate in roots if local_target == candidate.resolve() or candidate.resolve() in local_target.parents), None)) else None
+                target_id = target_project["project_id"] if target_project else None
+                if not local_target and not specifier.startswith("."):
+                    package = package_name(specifier)
+                    target_id = package_index.get(package, f"external:{package}")
+                    resolution = "workspace_package" if package in package_index else "external"
+                if not target_id:
+                    target_id = "external:UNKNOWN"
+                evidence = rel(workspace_root, path)
+                record = {
+                    "import_id": stable_id("import", json.dumps([project["project_id"], evidence, specifier, import_kind], sort_keys=True)),
+                    "source_project_id": project["project_id"],
+                    "source_path": rel(root, path),
+                    "language": language,
+                    "specifier": specifier,
+                    "kind": "dynamic_import" if import_kind == "dynamic" else "module_import",
+                    "resolution": resolution,
+                    "target_project_id": target_id,
+                    "target_path": target_path,
+                    "evidence": [evidence],
+                }
+                records.append(record)
+                if resolution != "local" and target_id != project["project_id"]:
+                    target = next((item for item in projects if item["project_id"] == target_id), None)
+                    edge = make_edge(project["project_id"], target_id, "module_import", "required", "active", evidence, {"specifier": specifier, "language": language, "resolution": resolution}, projects, target)
+                    edge["confidence"] = "medium" if resolution in {"external", "unresolved"} else "high"
+                    edges.append(edge)
+    return sorted(records, key=lambda item: item["import_id"]), sorted(edges, key=lambda item: item["dependency_id"])
+
+
 def source_truth_rules(projects: list[dict[str, Any]], artifacts: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Return explicitly configured source-of-truth rules.
 
@@ -641,12 +758,20 @@ def discover(workspace_roots: list[Path], excluded_names: set[str] | None = None
                 name = json.loads(read_text(manifest)).get("name")
                 if name: package_index[name] = p["project_id"]
             except json.JSONDecodeError: pass
+    imports: list[dict[str, Any]] = []
+    import_dependencies: list[dict[str, Any]] = []
+    for item in active_root_paths:
+        project = projects_by_root[str(item)]
+        discovered_imports, discovered_edges = module_import_records(item, root_for_project[str(item)], project, active_root_paths, projects_by_root, projects, package_index)
+        imports.extend(discovered_imports)
+        import_dependencies.extend(discovered_edges)
     dependencies: list[dict[str, Any]] = []
     for item in active_root_paths:
         p = projects_by_root[str(item)]; workspace_root = root_for_project[str(item)]
         dependencies.extend(package_edges(item, portfolio_parent, workspace_root, p["project_id"], projects, package_index))
         dependencies.extend(text_edges(item, workspace_root, p["project_id"], active_root_paths, projects_by_root, projects))
     dependencies.extend(manifest_dependencies)
+    dependencies.extend(import_dependencies)
     raw_dependencies = list(dependencies)
     grouped: dict[str, dict[str, Any]] = {}
     for edge in dependencies:
@@ -665,7 +790,7 @@ def discover(workspace_roots: list[Path], excluded_names: set[str] | None = None
         "portfolio": {"portfolio_id": "default.portfolio", "name": "Default Portfolio", "workspace_roots": root_data},
         "workspace": {"roots": root_data, "root": root_data[0]["path"] if len(root_data) == 1 else None, "observed_at": datetime.now(timezone.utc).isoformat()},
         "repositories": sorted(repos.values(), key=lambda r: r["repository_id"]), "checkouts": sorted(checkouts, key=lambda c: c["checkout_id"]),
-        "projects": projects, "artifacts": sorted(artifacts, key=lambda a: a["artifact_id"]), "dependencies": dependencies, "relationships": relationships,
+        "projects": projects, "artifacts": sorted(artifacts, key=lambda a: a["artifact_id"]), "dependencies": dependencies, "relationships": relationships, "imports": sorted(imports, key=lambda item: item["import_id"]),
         "source_of_truth": source_truth_rules(projects, artifacts) + manifest_source_truth, "findings": [], "exclusions": sorted(DEFAULT_IGNORES), "excluded_projects": excluded,
         "_local_roots": [{"root_id": item["root_id"], "local_path": item["local_path"]} for item in root_records],
     }
@@ -719,7 +844,7 @@ def snapshot_validation_errors(snapshot: dict[str, Any]) -> list[str]:
     errors.extend(f"missing top-level field: {field}" for field in sorted(required - set(snapshot)))
     if snapshot.get("schema") != SCHEMA:
         errors.append(f"unsupported schema: {snapshot.get('schema', 'UNKNOWN')}")
-    for collection in ("projects", "repositories", "checkouts", "artifacts", "dependencies", "source_of_truth"):
+    for collection in ("projects", "repositories", "checkouts", "artifacts", "dependencies", "source_of_truth", "imports"):
         if collection in snapshot and not isinstance(snapshot[collection], list):
             errors.append(f"collection is not an array: {collection}")
     for index, project in enumerate(snapshot.get("projects", [])):
@@ -735,6 +860,10 @@ def snapshot_validation_errors(snapshot: dict[str, Any]) -> list[str]:
                 errors.append(f"{collection}[{index}] is missing edge identity or endpoints")
             elif edge.get("scope") not in valid_scopes:
                 errors.append(f"{collection}[{index}] has invalid scope: {edge.get('scope', 'UNKNOWN')}")
+    for index, item in enumerate(snapshot.get("imports", [])):
+        required_import_fields = ("import_id", "source_project_id", "source_path", "language", "specifier", "kind", "resolution", "evidence")
+        if not isinstance(item, dict) or any(not item.get(field) for field in required_import_fields):
+            errors.append(f"imports[{index}] is missing required import metadata")
     if not no_absolute_paths(snapshot):
         errors.append("snapshot contains an absolute local path")
     return errors
@@ -1061,6 +1190,7 @@ def command(args: argparse.Namespace) -> int:
     elif action in {"checkouts", "checkout"}: print_json(snapshot["checkouts"])
     elif action in {"artifacts", "artifact"}: print_json(snapshot["artifacts"])
     elif action in {"dependencies", "deps", "dependency"}: print_json(snapshot["dependencies"])
+    elif action in {"imports", "import"}: print_json(snapshot.get("imports", []))
     elif action in {"relationships", "relationship"}:
         relationships = snapshot.get("relationships", [])
         if getattr(args, "project", None):
@@ -1110,9 +1240,10 @@ def command(args: argparse.Namespace) -> int:
         selected_artifacts = [item for item in snapshot["artifacts"] if item["project_id"] in selected_ids]
         selected_dependencies = [item for item in snapshot["dependencies"] if item["source"]["project_id"] in selected_ids or item["target"]["project_id"] in selected_ids]
         selected_relationships = [item for item in snapshot.get("relationships", []) if item["source"]["project_id"] in selected_ids or item["target"]["project_id"] in selected_ids]
+        selected_imports = [item for item in snapshot.get("imports", []) if item["source_project_id"] in selected_ids or item.get("target_project_id") in selected_ids]
         selected_rules = [item for item in snapshot["source_of_truth"] if any(project_id in json.dumps(item, ensure_ascii=False) for project_id in selected_ids)]
         selected_findings = [item for item in snapshot["findings"] if any(project_id in json.dumps(item, ensure_ascii=False) for project_id in selected_ids)]
-        print_json({"portfolio": snapshot["portfolio"], "projects": selected, "artifacts": selected_artifacts, "dependencies": selected_dependencies, "relationships": selected_relationships, "source_of_truth": selected_rules, "findings": selected_findings, "snapshot_id": snapshot["snapshot_id"]})
+        print_json({"portfolio": snapshot["portfolio"], "projects": selected, "artifacts": selected_artifacts, "dependencies": selected_dependencies, "relationships": selected_relationships, "imports": selected_imports, "source_of_truth": selected_rules, "findings": selected_findings, "snapshot_id": snapshot["snapshot_id"]})
     elif action == "validate":
         errors = snapshot_validation_errors(snapshot)
         print_json({"valid": not errors, "snapshot_id": snapshot.get("snapshot_id"), "errors": errors, "findings": snapshot.get("findings", [])})
@@ -1167,9 +1298,9 @@ def parser() -> argparse.ArgumentParser:
     init = sub.add_parser("init"); init.add_argument("--root", dest="init_roots", action="append", required=True)
     discover_cmd = sub.add_parser("discover"); discover_cmd.add_argument("positional_roots", nargs="*"); discover_cmd.add_argument("--output"); add_workspace_options(discover_cmd)
     scan_cmd = sub.add_parser("scan", help="discover projects and artifacts (alias for discover)"); scan_cmd.add_argument("positional_roots", nargs="*"); scan_cmd.add_argument("--output"); add_workspace_options(scan_cmd)
-    for name in ("projects", "project", "repositories", "repo", "checkouts", "checkout", "artifacts", "artifact", "dependencies", "deps", "relationships", "relationship", "dependency-graph", "graph", "findings", "workspace", "context", "validate", "handoff"):
+    for name in ("projects", "project", "repositories", "repo", "checkouts", "checkout", "artifacts", "artifact", "dependencies", "deps", "imports", "import", "relationships", "relationship", "dependency-graph", "graph", "findings", "workspace", "context", "validate", "handoff"):
         child = sub.add_parser(name)
-        if name in {"context", "validate", "handoff", "workspace", "findings", "projects", "project", "repositories", "repo", "checkouts", "checkout", "artifacts", "artifact", "dependencies", "deps", "dependency", "relationships", "relationship", "dependency-graph", "graph"}:
+        if name in {"context", "validate", "handoff", "workspace", "findings", "projects", "project", "repositories", "repo", "checkouts", "checkout", "artifacts", "artifact", "dependencies", "deps", "dependency", "imports", "import", "relationships", "relationship", "dependency-graph", "graph"}:
             add_workspace_options(child)
         if name in {"relationships", "relationship"}:
             child.add_argument("--project", help="filter relationships touching a project")

@@ -73,6 +73,15 @@ This roadmap describes product outcomes, not promises of automatic support for e
 - [x] Typed relationship kind, status, strength, and evidence
 - [x] Service/event relationship edges represented in the existing graph
 
+## v0.9 — Static Module Import Discovery (released)
+
+- [x] Python import discovery
+- [x] JavaScript and TypeScript import discovery
+- [x] Go import discovery
+- [x] Rust import discovery
+- [x] Portable import records with local/external resolution and evidence
+- [x] Project dependency projection for external and workspace imports
+
 ## Later — Control Plane
 
 - [x] Opt-in enforced policy evaluation with machine-readable exit status

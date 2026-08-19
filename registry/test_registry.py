@@ -92,6 +92,32 @@ class MultiRootRegistryTests(unittest.TestCase):
             broken["projects"] = [{"name": "missing-id"}]
             self.assertTrue(any("projects[0]" in error for error in registry.snapshot_validation_errors(broken)))
 
+    def test_module_import_adapter_supports_python_javascript_go_and_rust(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp) / "workspace"
+            make_git_project(root / "app", "https://example.test/app.git", {
+                "py/app.py": "from .client import Client\nimport requests\n",
+                "py/client.py": "class Client: pass\n",
+                "web/index.ts": "import { value } from './util';\nconst x = require('lodash');\nconst y = import('@scope/events');\n",
+                "web/util.ts": "export const value = 1;\n",
+                "cmd/main.go": "package main\nimport (\n  \"fmt\"\n  \"example.com/acme/dep\"\n)\n",
+                "src/main.rs": "mod parser;\nuse serde::Deserialize;\n",
+                "src/parser.rs": "pub struct Parser;\n",
+            })
+            snapshot = registry.discover([root], excluded_names=set())
+            imports = snapshot["imports"]
+            self.assertEqual({item["language"] for item in imports}, {"python", "typescript", "go", "rust"})
+            self.assertTrue(any(item["specifier"] == ".client" and item["resolution"] == "local" for item in imports))
+            self.assertTrue(any(item["specifier"] == "./util" and item["resolution"] == "local" for item in imports))
+            self.assertTrue(any(item["specifier"] == "requests" and item["resolution"] == "external" for item in imports))
+            self.assertTrue(any(item["specifier"] == "lodash" and item["resolution"] == "external" for item in imports))
+            self.assertTrue(any(item["specifier"] == "lodash" and item["kind"] == "module_import" for item in imports))
+            self.assertTrue(any(item["specifier"] == "@scope/events" and item["kind"] == "dynamic_import" for item in imports))
+            self.assertTrue(any(item["specifier"] == "fmt" and item["language"] == "go" for item in imports))
+            self.assertTrue(any(item["specifier"] == "parser" and item["resolution"] == "local" for item in imports))
+            self.assertTrue(any(item["specifier"] == "serde::Deserialize" and item["resolution"] == "external" for item in imports))
+            self.assertEqual(registry.snapshot_validation_errors(snapshot), [])
+
     def test_scan_alias_accepts_root_after_subcommand(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp) / "workspace"

@@ -14,6 +14,7 @@
     "artifacts": {"type": "array", "items": {"$ref": "#/$defs/artifact"}},
     "dependencies": {"type": "array", "items": {"$ref": "#/$defs/dependency"}},
     "relationships": {"type": "array", "items": {"$ref": "#/$defs/dependency"}},
+    "imports": {"type": "array", "items": {"$ref": "#/$defs/import"}},
     "source_of_truth": {"type": "array", "items": {"type": "object"}}
   },
   "$defs": {
@@ -58,6 +59,22 @@
         "target": {"type": "object"},
         "kind": {"type": "string"},
         "scope": {"enum": ["intra_root", "cross_root", "external", "unknown"]},
+        "evidence": {"type": "array", "items": {"type": "string"}}
+      }
+    },
+    "import": {
+      "type": "object",
+      "required": ["import_id", "source_project_id", "source_path", "language", "specifier", "kind", "resolution", "evidence"],
+      "properties": {
+        "import_id": {"type": "string"},
+        "source_project_id": {"type": "string"},
+        "source_path": {"type": "string"},
+        "language": {"type": "string"},
+        "specifier": {"type": "string"},
+        "kind": {"enum": ["module_import", "dynamic_import"]},
+        "resolution": {"enum": ["local", "workspace_package", "external", "unresolved"]},
+        "target_project_id": {"type": "string"},
+        "target_path": {"type": ["string", "null"]},
         "evidence": {"type": "array", "items": {"type": "string"}}
       }
     }

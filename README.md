@@ -233,6 +233,22 @@ GitHub Actions workflows under `.github/workflows/` are registered as
 to impact analysis without executing workflows, accessing secrets, or claiming
 that a check passed.
 
+## Module imports
+
+Static module imports are exposed through the portable `imports` collection and
+the CLI:
+
+```bash
+aine imports --root /path/to/workspace
+```
+
+The built-in adapter supports Python, JavaScript, TypeScript, Go, and Rust. It
+records source path, language, specifier, static/dynamic kind, local or
+external resolution, target path when resolvable, and evidence. Local imports
+remain file-level records; external and workspace-package imports also become
+project dependency edges. Unresolvable imports remain explicit rather than
+being treated as absent.
+
 For example, impact analysis against live workspace roots currently uses:
 
 ```bash

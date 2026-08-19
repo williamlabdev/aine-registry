@@ -170,6 +170,15 @@ declared jobs as provenance artifacts. It does not execute workflows, inspect
 secret values, or convert a workflow definition into evidence that a check
 passed; runtime check results remain external evidence.
 
+## Static module import boundary
+
+The module import adapter statically recognizes Python, JavaScript,
+TypeScript, Go, and Rust import forms. It emits portable file-level records in
+the `imports` collection. Local imports are resolved to relative target paths
+when possible; external and workspace-package imports are projected into the
+project dependency graph. Dynamic, aliased, generated, or unresolved imports
+retain explicit status and evidence instead of being guessed or executed.
+
 ## Explicit relationship provider
 
 The manifest `relationships` array is the first provider boundary for service
