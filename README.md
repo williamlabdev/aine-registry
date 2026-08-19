@@ -64,8 +64,8 @@ aine preflight --root /path/to/workspace --staged
 aine preflight --root /path/to/workspace --base origin/main
 ```
 
-The installed `aine` command is the supported interface in v0.4.0. The Python
-script entrypoint remains available for backwards compatibility.
+The installed `aine` command is the supported interface. The Python script
+entrypoint remains available for backwards compatibility.
 
 ## Project-local metadata
 

@@ -34,9 +34,11 @@ jobs:
         run: >-
           aine preflight --root . --base origin/main --format markdown
           --output .aine-preflight.md
+        if: always()
 
       - name: Upload preflight reports
         uses: actions/upload-artifact@v4
+        if: always()
         with:
           name: aine-preflight
           path: |
