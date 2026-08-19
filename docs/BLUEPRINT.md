@@ -210,7 +210,15 @@ findings with evidence. The registry does not silently select a winner.
 
 ## Extension boundaries
 
-The public core should remain generic. Project-specific business metadata, source-of-truth rules, service catalogs, deployment providers, enforced policy engines, agent execution, and hosted storage belong in adapters or higher-level control-plane components. The public core only evaluates the small, portable advisory policy contract described above.
+The public core should remain generic. Project-specific business metadata, source-of-truth rules, service catalogs, deployment providers, organization-wide policy engines, agent execution, and hosted storage belong in adapters or higher-level control-plane components. The public core evaluates only the small, portable policy contract described above; enforced mode remains a local CLI exit-status boundary rather than an external authorization system.
+
+The public core also evaluates a deliberately small authorization context. A
+policy may match a subject's roles (RBAC) and portable attributes on the
+subject, action, resource, or evaluation context (ABAC). Decisions are recorded
+as evidence and can affect preflight status, but identity providers, team
+directories, approval execution, and deployment authorization remain outside
+the core. Relationship-based ownership and delegation are future control-plane
+concerns.
 
 ## Verification gates
 

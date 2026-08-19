@@ -15,7 +15,8 @@
         "policy_mode": {"enum": ["advisory", "enforced"]},
         "policy_status": {"enum": ["pass", "review_required", "fail"]},
         "policy_enforced_failure": {"type": "boolean"},
-        "policy_evidence": {"type": "object"}
+        "policy_evidence": {"type": "object"},
+        "authorization": {"type": "object"}
       }
     }
   }

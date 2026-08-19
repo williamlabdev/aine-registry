@@ -360,6 +360,66 @@ class MultiRootRegistryTests(unittest.TestCase):
             self.assertTrue(report["policy"]["enforced_failure"])
             self.assertEqual(report["policy"]["exit_code"], 1)
 
+    def test_authorization_context_supports_rbac_and_abac_conditions(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp) / "workspace"
+            make_git_project(root, "https://example.test/service.git", {"README.md": "service\n"})
+            (root / ".aine").mkdir()
+            (root / ".aine" / "registry.json").write_text(json.dumps({
+                "project": {
+                    "policy": {
+                        "authorization": {
+                            "rules": [{
+                                "id": "platform-preflight",
+                                "effect": "allow",
+                                "actions": ["preflight"],
+                                "roles": ["developer"],
+                                "conditions": {"subject.attributes.team": "platform", "resource.risk": "low"},
+                            }]
+                        }
+                    }
+                }
+            }), encoding="utf-8")
+            snapshot = registry.discover([root], excluded_names=set())
+            report = registry.preflight(snapshot, ["README.md"], [root], authorization_context={
+                "subject": {"id": "agent.codex", "roles": ["developer"], "attributes": {"team": "platform"}},
+                "action": "preflight",
+            })
+            self.assertEqual(report["policy"]["authorization"]["status"], "pass")
+            self.assertEqual(report["policy"]["authorization"]["decisions"][0]["rule_id"], "platform-preflight")
+
+    def test_enforced_policy_rejects_unknown_change_without_affected_project(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp) / "workspace"
+            make_git_project(root, "https://example.test/service.git")
+            snapshot = registry.discover([root], excluded_names=set())
+            report = registry.preflight(snapshot, ["outside/unknown.txt"], [root], policy_mode="enforced")
+            self.assertEqual(report["policy"]["status"], "fail")
+            self.assertTrue(report["policy"]["enforced_failure"])
+            self.assertEqual(report["policy"]["exit_code"], 1)
+            self.assertTrue(any(check["rule"] == "deny_unknown_changes" for check in report["policy"]["checks"]))
+
+    def test_handoff_from_preflight_does_not_require_workspace_discovery(self):
+        with tempfile.TemporaryDirectory() as temp:
+            base = Path(temp)
+            evidence = base / "preflight.json"
+            evidence.write_text(json.dumps({
+                "changes": ["service/api.yaml"],
+                "affected_projects": [],
+                "risk": {"level": "low", "approval_required": False, "signals": []},
+                "policy": {"mode": "advisory", "status": "pass", "enforced_failure": False},
+                "required_validation": [],
+                "unknowns": [],
+                "evidence": {"evidence_id": "evidence.test"},
+            }), encoding="utf-8")
+            result = subprocess.run([
+                sys.executable, str(Path(__file__).parent / "aine_registry.py"),
+                "handoff", "--root", str(base / "does-not-exist"), "--preflight", str(evidence),
+            ], capture_output=True, text=True, check=True)
+            handoff = json.loads(result.stdout)
+            self.assertEqual(handoff["schema"], "aine.handoff.v1")
+            self.assertEqual(handoff["evidence_id"], "evidence.test")
+
     def test_excluded_project_is_not_active(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp) / "side-projects"

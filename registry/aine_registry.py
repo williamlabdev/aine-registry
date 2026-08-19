@@ -1037,7 +1037,57 @@ def markdown_preflight(report: dict[str, Any]) -> str:
     return "\n".join(lines) + "\n"
 
 
-def evaluate_policy(projects: list[dict[str, Any]], validation: list[dict[str, Any]], unresolved_changes: list[str], risk: dict[str, Any], unknowns: list[dict[str, Any]] | None = None, mode_override: str | None = None) -> dict[str, Any]:
+def authorization_value_matches(actual: Any, expected: Any) -> bool:
+    if isinstance(expected, list):
+        expected_values = {str(item) for item in expected}
+        if isinstance(actual, list):
+            return bool(expected_values.intersection(str(item) for item in actual))
+        return str(actual) in expected_values
+    if isinstance(actual, list):
+        return str(expected) in {str(item) for item in actual}
+    return actual == expected or str(actual) == str(expected)
+
+
+def authorization_lookup(context: dict[str, Any], path: str) -> Any:
+    value: Any = context
+    for part in path.split("."):
+        if not isinstance(value, dict) or part not in value:
+            return None
+        value = value[part]
+    return value
+
+
+def evaluate_authorization(projects: list[dict[str, Any]], context: dict[str, Any]) -> dict[str, Any]:
+    decisions: list[dict[str, Any]] = []
+    for project in projects:
+        policy = project.get("policy", {})
+        if not isinstance(policy, dict):
+            continue
+        authorization = policy.get("authorization", {})
+        rules = authorization.get("rules", []) if isinstance(authorization, dict) else []
+        if not isinstance(rules, list):
+            continue
+        for rule in rules:
+            if not isinstance(rule, dict):
+                continue
+            roles = rule.get("roles", [])
+            if roles and not set(str(role) for role in roles).intersection(context.get("subject", {}).get("roles", [])):
+                continue
+            actions = rule.get("actions", [])
+            if actions and context.get("action") not in {str(action) for action in actions}:
+                continue
+            conditions = rule.get("conditions", {})
+            if not isinstance(conditions, dict) or not all(authorization_value_matches(authorization_lookup(context, str(path)), expected) for path, expected in conditions.items()):
+                continue
+            effect = str(rule.get("effect", "review_required"))
+            status = "fail" if effect == "deny" else ("pass" if effect == "allow" else "review_required")
+            decisions.append({"project_id": project["project_id"], "rule_id": str(rule.get("id", "UNKNOWN")), "effect": effect, "status": status, "evidence": rule.get("evidence", [])})
+    statuses = {item["status"] for item in decisions}
+    status = "fail" if "fail" in statuses else ("review_required" if "review_required" in statuses else ("pass" if "pass" in statuses else "not_configured"))
+    return {"status": status, "context": context, "decisions": decisions}
+
+
+def evaluate_policy(projects: list[dict[str, Any]], validation: list[dict[str, Any]], unresolved_changes: list[str], risk: dict[str, Any], unknowns: list[dict[str, Any]] | None = None, mode_override: str | None = None, authorization_context: dict[str, Any] | None = None) -> dict[str, Any]:
     checks: list[dict[str, Any]] = []
     modes: set[str] = set()
     for project in projects:
@@ -1062,6 +1112,11 @@ def evaluate_policy(projects: list[dict[str, Any]], validation: list[dict[str, A
             checks.append({"project_id": project_id, "rule": "required_checks", "status": "fail", "message": f"required validation is not discoverable: {required_check}"})
         if not required_checks and not (required_risks and risk["level"] in required_risks) and not (policy.get("deny_unknown_changes") and unresolved_changes):
             checks.append({"project_id": project_id, "rule": "policy", "status": "pass", "message": "no declared policy violation"})
+    if unresolved_changes and mode_override == "enforced" and not any(check["rule"] == "deny_unknown_changes" for check in checks):
+        checks.append({"project_id": "UNKNOWN", "rule": "deny_unknown_changes", "status": "fail", "message": "enforced policy cannot pass changes outside the registered boundary"})
+    authorization = evaluate_authorization(projects, authorization_context or {"subject": {"id": "anonymous", "roles": [], "attributes": {}}, "action": "preflight", "resource": {"type": "change_set", "risk": risk.get("level")}, "context": {"evidence_status": "unknown"}})
+    if authorization["status"] in {"fail", "review_required"}:
+        checks.append({"project_id": "AUTHORIZATION", "rule": "authorization", "status": authorization["status"], "message": f"authorization decision: {authorization['status']}"})
     statuses = {check["status"] for check in checks}
     status = "fail" if "fail" in statuses else ("review_required" if "review_required" in statuses else "pass")
     mode = "enforced" if "enforced" in modes else (mode_override or "advisory")
@@ -1078,6 +1133,7 @@ def evaluate_policy(projects: list[dict[str, Any]], validation: list[dict[str, A
         "enforced_failure": enforced_failure,
         "exit_code": 1 if enforced_failure else 0,
         "advisory_only": mode != "enforced",
+        "authorization": authorization,
     }
 
 
@@ -1100,7 +1156,7 @@ def handoff_from_preflight(report: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def preflight(snapshot: dict[str, Any], changes: list[str], roots: list[Path], policy_mode: str | None = None) -> dict[str, Any]:
+def preflight(snapshot: dict[str, Any], changes: list[str], roots: list[Path], policy_mode: str | None = None, authorization_context: dict[str, Any] | None = None) -> dict[str, Any]:
     matched_projects: list[dict[str, Any]] = []
     matched_artifacts: list[dict[str, Any]] = []
     unresolved: list[str] = []
@@ -1137,7 +1193,14 @@ def preflight(snapshot: dict[str, Any], changes: list[str], roots: list[Path], p
     if not matched_projects and not matched_artifacts:
         unknowns.append({"finding_id": "PREFLIGHT-002", "severity": "high", "category": "boundary", "status": "human_review_required", "subject": "change_scope", "message": "The change is outside the known registry boundary; do not assume it is safe to modify.", "evidence": changes})
     risk = risk_report(affected_projects, matched_artifacts)
-    policy = evaluate_policy(affected_projects, validation, unresolved, risk, unknowns, policy_mode)
+    supplied_context = authorization_context or {}
+    context = {
+        "subject": supplied_context.get("subject", {"id": "anonymous", "roles": [], "attributes": {}}),
+        "action": supplied_context.get("action", "preflight"),
+        "resource": {"type": "change_set", "risk": risk.get("level"), "project_ids": [project["project_id"] for project in affected_projects], **supplied_context.get("resource", {})},
+        "context": {"evidence_status": "complete" if not unknowns else "unknown", **supplied_context.get("context", {})},
+    }
+    policy = evaluate_policy(affected_projects, validation, unresolved, risk, unknowns, policy_mode, context)
     report = {
         "changes": changes,
         "matched_projects": matched_projects,
@@ -1166,6 +1229,7 @@ def preflight(snapshot: dict[str, Any], changes: list[str], roots: list[Path], p
             "policy_mode": policy["mode"],
             "policy_enforced_failure": policy["enforced_failure"],
             "policy_evidence": policy["evidence"],
+            "authorization": policy["authorization"],
         },
     }
     return report
@@ -1176,6 +1240,21 @@ def command(args: argparse.Namespace) -> int:
         return write_local_config(args)
     if args.action == "portfolio" and args.portfolio_action == "list":
         snapshot = load_snapshot(args); print_json(snapshot["portfolio"]); return 0
+    if args.action == "handoff" and getattr(args, "preflight", None):
+        try:
+            report = json.loads(Path(args.preflight).expanduser().read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            print(f"could not read preflight report: {exc}", file=sys.stderr); return 2
+        handoff = handoff_from_preflight(report)
+        if args.output:
+            output = Path(args.output).expanduser().resolve(); output.parent.mkdir(parents=True, exist_ok=True)
+            output.write_text(json.dumps(handoff, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+            print_json({"status": "written", "handoff_id": handoff["handoff_id"]})
+        elif args.format == "markdown":
+            print(f"# AINE Handoff\n\n- Handoff ID: `{handoff['handoff_id']}`\n- Status: **{handoff['status']}**\n- Evidence ID: `{handoff['evidence_id']}`\n\n## Next actions\n" + "\n".join(f"- {item}" for item in handoff["next_actions"]))
+        else:
+            print_json(handoff)
+        return 0
     roots = configured_roots(args)
     if any(not root.is_dir() for root in roots): print("workspace root does not exist", file=sys.stderr); return 2
     snapshot = load_snapshot(args) if args.snapshot else discover(roots, set(args.exclude_project or DEFAULT_EXCLUDED_PROJECTS))
@@ -1216,7 +1295,16 @@ def command(args: argparse.Namespace) -> int:
             changes, git_sources = git_change_set(snapshot, roots, mode, args.base)
             change_source = mode
         if not changes: print("preflight requires at least one --change", file=sys.stderr); return 2
-        report = preflight(snapshot, changes, roots, getattr(args, "policy_mode", None))
+        attributes = {}
+        for item in getattr(args, "attribute", []) or []:
+            if "=" in item:
+                key, value = item.split("=", 1)
+                attributes[key] = value
+        authorization_context = {
+            "subject": {"id": getattr(args, "subject_id", None) or "anonymous", "roles": list(getattr(args, "role", []) or []), "attributes": attributes},
+            "action": "preflight",
+        }
+        report = preflight(snapshot, changes, roots, getattr(args, "policy_mode", None), authorization_context)
         report["change_source"] = change_source
         report["git_sources"] = git_sources
         if args.output:
@@ -1248,22 +1336,7 @@ def command(args: argparse.Namespace) -> int:
         errors = snapshot_validation_errors(snapshot)
         print_json({"valid": not errors, "snapshot_id": snapshot.get("snapshot_id"), "errors": errors, "findings": snapshot.get("findings", [])})
     elif action == "handoff":
-        if getattr(args, "preflight", None):
-            try:
-                report = json.loads(Path(args.preflight).expanduser().read_text(encoding="utf-8"))
-            except (OSError, json.JSONDecodeError) as exc:
-                print(f"could not read preflight report: {exc}", file=sys.stderr); return 2
-            handoff = handoff_from_preflight(report)
-            if args.output:
-                output = Path(args.output).expanduser().resolve(); output.parent.mkdir(parents=True, exist_ok=True)
-                output.write_text(json.dumps(handoff, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-                print_json({"status": "written", "handoff_id": handoff["handoff_id"]})
-            elif args.format == "markdown":
-                print(f"# AINE Handoff\n\n- Handoff ID: `{handoff['handoff_id']}`\n- Status: **{handoff['status']}**\n- Evidence ID: `{handoff['evidence_id']}`\n\n## Next actions\n" + "\n".join(f"- {item}" for item in handoff["next_actions"]))
-            else:
-                print_json(handoff)
-        else:
-            print_json({"portfolio_id": snapshot["portfolio"]["portfolio_id"], "snapshot_id": snapshot["snapshot_id"], "projects": [{"project_id": p["project_id"], "root_id": p["root_id"], "checkout_id": p["checkout_id"], "path": p["path"]} for p in snapshot["projects"]], "cross_root_dependencies": sum(e["scope"] == "cross_root" for e in snapshot["dependencies"])})
+        print_json({"portfolio_id": snapshot["portfolio"]["portfolio_id"], "snapshot_id": snapshot["snapshot_id"], "projects": [{"project_id": p["project_id"], "root_id": p["root_id"], "checkout_id": p["checkout_id"], "path": p["path"]} for p in snapshot["projects"]], "cross_root_dependencies": sum(e["scope"] == "cross_root" for e in snapshot["dependencies"])})
     else: return 2
     return 0
 
@@ -1317,7 +1390,7 @@ def parser() -> argparse.ArgumentParser:
     dependency = sub.add_parser("dependency"); dependency.add_argument("subcommand", nargs="?")
     sot = sub.add_parser("source-of-truth"); sot.add_argument("domain")
     impact_cmd = sub.add_parser("impact"); impact_cmd.add_argument("target", nargs="?"); impact_cmd.add_argument("--project"); impact_cmd.add_argument("--path"); impact_cmd.add_argument("--artifact"); add_workspace_options(impact_cmd)
-    preflight_cmd = sub.add_parser("preflight", help="analyze a proposed change without mutating the workspace"); preflight_cmd.add_argument("--change", action="append", help="changed path, artifact, or project; repeat as needed"); preflight_cmd.add_argument("--diff", action="store_true", help="read staged and unstaged changes from Git"); preflight_cmd.add_argument("--staged", action="store_true", help="read staged changes from Git"); preflight_cmd.add_argument("--base", help="compare each checkout against BASE...HEAD"); preflight_cmd.add_argument("--format", choices=("json", "markdown"), default="json"); preflight_cmd.add_argument("--output", help="write the preflight evidence report"); preflight_cmd.add_argument("--policy-mode", choices=("advisory", "enforced"), help="override project policy mode for this preflight"); add_workspace_options(preflight_cmd)
+    preflight_cmd = sub.add_parser("preflight", help="analyze a proposed change without mutating the workspace"); preflight_cmd.add_argument("--change", action="append", help="changed path, artifact, or project; repeat as needed"); preflight_cmd.add_argument("--diff", action="store_true", help="read staged and unstaged changes from Git"); preflight_cmd.add_argument("--staged", action="store_true", help="read staged changes from Git"); preflight_cmd.add_argument("--base", help="compare each checkout against BASE...HEAD"); preflight_cmd.add_argument("--format", choices=("json", "markdown"), default="json"); preflight_cmd.add_argument("--output", help="write the preflight evidence report"); preflight_cmd.add_argument("--policy-mode", choices=("advisory", "enforced"), help="override project policy mode for this preflight"); preflight_cmd.add_argument("--subject-id", help="portable subject identifier for policy evaluation"); preflight_cmd.add_argument("--role", action="append", help="subject role; repeat as needed"); preflight_cmd.add_argument("--attribute", action="append", help="subject attribute as key=value; repeat as needed"); add_workspace_options(preflight_cmd)
     portfolio = sub.add_parser("portfolio"); portfolio_sub = portfolio.add_subparsers(dest="portfolio_action", required=True); pd = portfolio_sub.add_parser("discover"); pd.add_argument("--root", dest="portfolio_roots", action="append"); pd.add_argument("--output"); portfolio_sub.add_parser("list")
     return p
 

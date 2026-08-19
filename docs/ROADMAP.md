@@ -82,11 +82,15 @@ This roadmap describes product outcomes, not promises of automatic support for e
 - [x] Portable import records with local/external resolution and evidence
 - [x] Project dependency projection for external and workspace imports
 
-## Later — Control Plane
+## v0.10 — Authorization and Policy Context (released)
 
 - [x] Opt-in enforced policy evaluation with machine-readable exit status
+- [x] Portable authorization context with RBAC roles and ABAC conditions
+
+## Later — Control Plane
+
 - [ ] Approval workflows
-- [ ] Team ownership and RBAC
+- [ ] Team ownership, relationship-based access, and delegated authorization
 - [ ] Audit evidence storage
 - [ ] Hosted or self-hosted portfolio views
 - [ ] Enterprise retention and compliance integrations

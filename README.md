@@ -183,6 +183,37 @@ In `enforced` mode, a non-`pass` policy returns exit code 1 and sets
 `policy.enforced_failure: true`; it still does not modify Git, files, CI, or
 deployment. A CLI mode override takes precedence over the project manifest.
 
+Policy authorization can also combine RBAC roles with ABAC conditions:
+
+```json
+{
+  "project": {
+    "policy": {
+      "authorization": {
+        "rules": [
+          {
+            "id": "platform-preflight",
+            "effect": "allow",
+            "actions": ["preflight"],
+            "roles": ["developer"],
+            "conditions": {
+              "subject.attributes.team": "platform",
+              "resource.risk": "low"
+            }
+          }
+        ]
+      }
+    }
+  }
+}
+```
+
+The caller supplies a portable subject context with `--subject-id`, repeated
+`--role`, and `--attribute key=value` options. AINE evaluates roles and
+attributes, then records `allow`, `review_required`, or `fail` decisions. It
+does not provide an identity provider or perform approval, merge, or deployment
+actions.
+
 Save a machine-readable evidence bundle and create a handoff record:
 
 ```bash

@@ -8,6 +8,7 @@ The registry connects projects, repositories, checkouts, artifacts, dependencies
 
 ```text
 What am I allowed to change?
+Who or what is allowed to perform this action?
 What else could this change affect?
 Which artifact is authoritative?
 What evidence supports that conclusion?
@@ -31,7 +32,7 @@ It is designed to be:
 - **Portable** — snapshots do not depend on one machine's absolute paths.
 - **Read-only by default** — discovery does not mutate projects or execute deployments.
 - **Explicit about uncertainty** — `UNKNOWN` is a useful result, not a failure to hide.
-- **Composable** — project-specific metadata and future control-plane policies live in adapters.
+- **Composable** — portable policy context is part of the core, while identity providers, team directories, and organization-specific governance live in adapters.
 
 ## Non-goals
 
@@ -41,6 +42,7 @@ AINE Registry is not currently:
 - a replacement for CI/CD, service catalogs, or observability systems
 - a runtime service mesh or deployment controller
 - an automatic interpreter of business rules
+- an identity provider, team directory, or approval authority
 - a guarantee that dynamic runtime relationships are completely discoverable
 
 ## Long-term direction
@@ -48,7 +50,7 @@ AINE Registry is not currently:
 The registry is the foundation for an evidence-based change assurance layer:
 
 ```text
-Discover → Explain impact → Check policy → Validate → Record evidence
+Discover → Explain impact → Check policy and authorization → Validate → Record evidence → Handoff
 ```
 
 The core remains open and local-first. Higher-level governance, approvals, hosted collaboration, and enterprise integrations can be built around it without making the registry depend on a hosted control plane.
