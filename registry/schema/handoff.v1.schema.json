@@ -13,6 +13,7 @@
     "affected_projects": {"type": "array"},
     "risk": {"type": "object"},
     "policy": {"type": "object", "properties": {"mode": {"enum": ["advisory", "enforced"]}, "status": {"enum": ["pass", "review_required", "fail"]}, "enforced_failure": {"type": "boolean"}, "exit_code": {"type": "integer"}, "authorization": {"type": "object"}}},
+    "approval": {"type": "object"},
     "required_validation": {"type": "array"},
     "unknowns": {"type": "array"},
     "next_actions": {"type": "array", "items": {"type": "string"}},

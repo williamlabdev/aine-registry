@@ -329,6 +329,23 @@ class MultiRootRegistryTests(unittest.TestCase):
             handoff_data = json.loads(handoff.stdout)
             self.assertEqual(handoff_data["schema"], "aine.handoff.v1")
             self.assertEqual(handoff_data["status"], "human_review_required")
+            self.assertEqual(handoff_data["approval"]["schema"], "aine.approval.v1")
+            self.assertEqual(handoff_data["approval"]["status"], "blocked")
+
+            handoff_file = Path(temp) / "handoff.json"
+            handoff_file.write_text(json.dumps(handoff_data), encoding="utf-8")
+            approval = subprocess.run([sys.executable, str(Path(__file__).parent / "aine_registry.py"), "approval", "--handoff", str(handoff_file)], capture_output=True, text=True, check=True)
+            approval_data = json.loads(approval.stdout)
+            self.assertEqual(approval_data["schema"], "aine.approval.v1")
+            self.assertEqual(approval_data["approval_id"], handoff_data["approval"]["approval_id"])
+            decided = subprocess.run([
+                sys.executable, str(Path(__file__).parent / "aine_registry.py"), "approval",
+                "--handoff", str(handoff_file), "--decision", "approved", "--decided-by", "human.william",
+            ], capture_output=True, text=True, check=True)
+            decided_data = json.loads(decided.stdout)
+            self.assertEqual(decided_data["status"], "approved")
+            self.assertEqual(decided_data["decision_source"], "external_input")
+            self.assertEqual(decided_data["decided_by"], "human.william")
 
             enforced_evidence = Path(temp) / "enforced-preflight.json"
             enforced = subprocess.run([sys.executable, str(Path(__file__).parent / "aine_registry.py"), "preflight", "--root", str(root), "--diff", "--policy-mode", "enforced", "--output", str(enforced_evidence)], capture_output=True, text=True)

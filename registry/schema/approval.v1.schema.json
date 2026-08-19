@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aine.dev/schemas/approval.v1.schema.json",
+  "title": "AINE Approval Request v1",
+  "type": "object",
+  "required": ["schema", "approval_id", "evidence_id", "status", "decision", "required", "reasons", "read_only"],
+  "properties": {
+    "schema": {"const": "aine.approval.v1"},
+    "approval_id": {"type": "string"},
+    "evidence_id": {"type": "string"},
+    "status": {"enum": ["not_required", "requested", "blocked", "approved", "rejected"]},
+    "decision": {"enum": ["not_required", "pending", "denied", "approved", "rejected"]},
+    "required": {"type": "boolean"},
+    "reasons": {"type": "array", "items": {"type": "string"}},
+    "affected_projects": {"type": "array", "items": {"type": "string"}},
+    "read_only": {"const": true},
+    "decided_by": {"type": "string"},
+    "decision_source": {"const": "external_input"}
+  }
+}

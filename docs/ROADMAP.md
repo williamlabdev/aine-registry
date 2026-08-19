@@ -87,6 +87,13 @@ This roadmap describes product outcomes, not promises of automatic support for e
 - [x] Opt-in enforced policy evaluation with machine-readable exit status
 - [x] Portable authorization context with RBAC roles and ABAC conditions
 
+## v0.11 — Approval Request Boundary (released)
+
+- [x] Generate read-only approval requests from preflight evidence
+- [x] Include approval requests in handoff records
+- [x] Provide `aine approval --handoff` export
+- [x] Record external approval decisions without executing them
+
 ## Later — Control Plane
 
 - [ ] Approval workflows

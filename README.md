@@ -224,6 +224,26 @@ aine handoff --preflight preflight.json --format markdown
 Evidence and handoff records are deterministic, read-only artifacts for review
 and agent coordination. They do not approve, merge, deploy, or mutate projects.
 
+When review or approval is required, the handoff includes an
+`aine.approval.v1` request. It can also be emitted independently:
+
+```bash
+aine approval --handoff handoff.json --output approval.json
+```
+
+The request records `requested`, `blocked`, or `not_required` state and keeps
+the evidence ID, reasons, and affected projects. An external decision can be
+recorded without executing it:
+
+```bash
+aine approval --handoff handoff.json \
+  --decision approved --decided-by human.william \
+  --output approval.json
+```
+
+AINE records the supplied decision as external input; it does not contact an
+identity, ticketing, merge, or deployment system.
+
 ## GitHub Actions integration
 
 The repository includes a reference workflow at

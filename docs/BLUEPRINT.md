@@ -104,6 +104,14 @@ from that record is `aine.handoff.v1` and contains the affected project scope,
 risk, required validation, unknowns, and next actions. Both records are
 portable, read-only, and suitable for review or agent context transfer.
 
+When a preflight requires human review, the handoff also contains an
+`aine.approval.v1` request. This is a portable request boundary, not an
+approval authority: it records why review is required, the related evidence,
+and whether the request is `requested`, `blocked`, or `not_required`. Approval
+decisions, identity, ticketing, merge, and deployment actions remain external.
+An external decision may be recorded as input with its actor identity, but the
+registry does not execute or verify that decision.
+
 ## Advisory policy evaluation
 
 Project-local policy is declarative metadata consumed during preflight. The

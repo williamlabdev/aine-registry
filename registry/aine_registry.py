@@ -1149,9 +1149,40 @@ def handoff_from_preflight(report: dict[str, Any]) -> dict[str, Any]:
         "affected_projects": [{"project_id": p["project_id"], "owner": p.get("owner", "UNKNOWN")} for p in report["affected_projects"]],
         "risk": report["risk"],
         "policy": policy,
+        "approval": report.get("approval", approval_request_from_preflight(report)),
         "required_validation": report["required_validation"],
         "unknowns": report["unknowns"],
         "next_actions": ((["Enforced policy failed; review policy evidence", "Review risk and unknown relationships", "Run required validation"] if policy.get("enforced_failure", False) else ["Review risk and unknown relationships", "Run required validation"]) if requires_review else ["Run required validation", "Review and merge when checks pass"]),
+        "read_only": True,
+    }
+
+
+def approval_request_from_preflight(report: dict[str, Any]) -> dict[str, Any]:
+    policy = report.get("policy", {})
+    authorization = policy.get("authorization", {})
+    reasons: list[str] = []
+    if report.get("risk", {}).get("approval_required"):
+        reasons.append("risk or artifact policy requires human approval")
+    if report.get("unknowns"):
+        reasons.append("preflight contains unknowns requiring human review")
+    if policy.get("status") == "review_required":
+        reasons.append("policy evaluation requires human review")
+    if authorization.get("status") == "review_required":
+        reasons.append("authorization policy requires human review")
+    blocked = policy.get("status") == "fail" or authorization.get("status") == "fail"
+    required = bool(reasons)
+    status = "blocked" if blocked else ("requested" if required else "not_required")
+    decision = "denied" if blocked else ("pending" if required else "not_required")
+    evidence_id = report.get("evidence", {}).get("evidence_id", "UNKNOWN")
+    return {
+        "schema": "aine.approval.v1",
+        "approval_id": stable_id("approval", evidence_id),
+        "evidence_id": evidence_id,
+        "status": status,
+        "decision": decision,
+        "required": required,
+        "reasons": reasons,
+        "affected_projects": [project["project_id"] for project in report.get("affected_projects", [])],
         "read_only": True,
     }
 
@@ -1232,6 +1263,12 @@ def preflight(snapshot: dict[str, Any], changes: list[str], roots: list[Path], p
             "authorization": policy["authorization"],
         },
     }
+    report["approval"] = approval_request_from_preflight(report)
+    report["evidence"]["claims"]["approval"] = {
+        "approval_id": report["approval"]["approval_id"],
+        "status": report["approval"]["status"],
+        "required": report["approval"]["required"],
+    }
     return report
 
 
@@ -1254,6 +1291,31 @@ def command(args: argparse.Namespace) -> int:
             print(f"# AINE Handoff\n\n- Handoff ID: `{handoff['handoff_id']}`\n- Status: **{handoff['status']}**\n- Evidence ID: `{handoff['evidence_id']}`\n\n## Next actions\n" + "\n".join(f"- {item}" for item in handoff["next_actions"]))
         else:
             print_json(handoff)
+        return 0
+    if args.action == "approval":
+        try:
+            record = json.loads(Path(args.handoff).expanduser().read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            print(f"could not read handoff record: {exc}", file=sys.stderr); return 2
+        approval = record.get("approval")
+        if not isinstance(approval, dict):
+            source = dict(record)
+            source["evidence"] = {"evidence_id": record.get("evidence_id", "UNKNOWN")}
+            approval = approval_request_from_preflight(source)
+        if getattr(args, "decision", None):
+            if not getattr(args, "decided_by", None):
+                print("--decided-by is required when recording an external decision", file=sys.stderr); return 2
+            approval = dict(approval)
+            approval["status"] = args.decision
+            approval["decision"] = args.decision
+            approval["decided_by"] = args.decided_by
+            approval["decision_source"] = "external_input"
+        if args.output:
+            output = Path(args.output).expanduser().resolve(); output.parent.mkdir(parents=True, exist_ok=True)
+            output.write_text(json.dumps(approval, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+            print_json({"status": "written", "approval_id": approval["approval_id"]})
+        else:
+            print_json(approval)
         return 0
     roots = configured_roots(args)
     if any(not root.is_dir() for root in roots): print("workspace root does not exist", file=sys.stderr); return 2
@@ -1387,6 +1449,11 @@ def parser() -> argparse.ArgumentParser:
             child.add_argument("--output", help="write the handoff record")
         if name in {"project", "repo", "checkout", "artifact", "dependency", "workspace"}:
             child.add_argument("subcommand", nargs="?")
+    approval = sub.add_parser("approval", help="emit a read-only approval request from a handoff")
+    approval.add_argument("--handoff", required=True, help="read a handoff record")
+    approval.add_argument("--output", help="write the approval request")
+    approval.add_argument("--decision", choices=("approved", "rejected"), help="record an external decision without executing it")
+    approval.add_argument("--decided-by", help="external subject that supplied the decision")
     dependency = sub.add_parser("dependency"); dependency.add_argument("subcommand", nargs="?")
     sot = sub.add_parser("source-of-truth"); sot.add_argument("domain")
     impact_cmd = sub.add_parser("impact"); impact_cmd.add_argument("target", nargs="?"); impact_cmd.add_argument("--project"); impact_cmd.add_argument("--path"); impact_cmd.add_argument("--artifact"); add_workspace_options(impact_cmd)
