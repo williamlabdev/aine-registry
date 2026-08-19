@@ -182,6 +182,10 @@ The `validate` command is the local verification gate for portable snapshots.
 It checks structural invariants and path redaction without requiring a third-
 party schema library or contacting a service.
 
+Diagnostics preserve ambiguity: unresolved providers remain `UNKNOWN`, while
+conflicting source-of-truth and dependency declarations become explicit
+findings with evidence. The registry does not silently select a winner.
+
 ## Extension boundaries
 
 The public core should remain generic. Project-specific business metadata, source-of-truth rules, service catalogs, deployment providers, enforced policy engines, agent execution, and hosted storage belong in adapters or higher-level control-plane components. The public core only evaluates the small, portable advisory policy contract described above.

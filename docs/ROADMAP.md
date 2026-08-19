@@ -20,7 +20,7 @@ This roadmap describes product outcomes, not promises of automatic support for e
 - [x] `scan`, `impact`, and `validate` command forms
 - [x] Installable package metadata with no runtime dependencies
 - [x] Human-readable impact reports
-- [ ] Better diagnostics for unresolved and contradictory relationships
+- [x] Better diagnostics for unresolved and contradictory relationships
 - [ ] Public examples for a small polyrepo system
 
 ## v0.3 — Agent Preflight (released)
@@ -32,7 +32,7 @@ This roadmap describes product outcomes, not promises of automatic support for e
 - [x] Affected-project report with project boundaries
 - [x] Required validation plan derived from project commands
 - [x] Unknown and unresolved change reporting
-- [ ] Risk annotations and human-review requirements
+- [x] Risk annotations and human-review requirements
 
 ## v0.4 — Change Assurance (released)
 
@@ -40,7 +40,7 @@ This roadmap describes product outcomes, not promises of automatic support for e
 - [x] Artifact and project risk metadata
 - [x] Human-review and approval-required signals
 - [x] JSON and Markdown preflight reports
-- [ ] Handoff and evidence record formats
+- [x] Handoff and evidence record formats
 
 ## v0.5 — Evidence and Handoff (released)
 

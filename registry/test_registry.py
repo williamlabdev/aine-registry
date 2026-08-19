@@ -116,11 +116,17 @@ class MultiRootRegistryTests(unittest.TestCase):
             (provider / ".aine").mkdir()
             (provider / ".aine" / "registry.json").write_text(json.dumps({
                 "artifacts": [{"id": "provider-api", "path": "api.yaml", "role": "source", "source_of_truth": True}],
-                "source_of_truth": [{"domain": "payments.api", "authority": {"project_id": "workspace.provider", "artifact": "provider-api"}}],
+                "source_of_truth": [
+                    {"domain": "payments.api", "authority": {"project_id": "workspace.provider", "artifact": "provider-api"}},
+                    {"domain": "payments.api", "authority": {"project_id": "workspace.consumer", "artifact": "consumer-api"}},
+                ],
             }), encoding="utf-8")
             (consumer / ".aine").mkdir()
             (consumer / ".aine" / "registry.json").write_text(json.dumps({
-                "dependencies": [{"target": "workspace.provider", "kind": "runtime_api"}],
+                "dependencies": [
+                    {"target": "workspace.provider", "kind": "runtime_api", "status": "active"},
+                    {"target": "workspace.provider", "kind": "runtime_api", "status": "historical"},
+                ],
                 "relationships": [{"target": "workspace.provider", "relationship_type": "event_consumer", "status": "planned"}],
             }), encoding="utf-8")
             snapshot = registry.discover([root], excluded_names=set())
@@ -143,6 +149,8 @@ class MultiRootRegistryTests(unittest.TestCase):
             self.assertIn("workspace.consumer", {p["project_id"] for p in report["affected_projects"]})
             self.assertTrue(report["read_only"])
             self.assertTrue(report["source_of_truth"])
+            self.assertTrue(any(item["finding_id"] == "SOT-001" for item in snapshot["findings"]))
+            self.assertTrue(any(item["finding_id"] == "REL-002" for item in snapshot["findings"]))
 
     def test_openapi_contract_adapter_registers_schema_artifact(self):
         with tempfile.TemporaryDirectory() as temp:

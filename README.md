@@ -132,6 +132,11 @@ aine validate --snapshot /tmp/aine-portfolio.json
 Validation checks the registry schema identity, core collection shape, edge
 endpoints/scopes, required identities, and absolute-path redaction.
 
+Discovery findings also identify unresolved providers (`DEP-001`), conflicting
+source-of-truth authorities (`SOT-001`), and contradictory dependency status
+or strength declarations (`REL-002`). AINE reports these conditions for human
+review rather than choosing an authority automatically.
+
 Preflight is read-only and reports matched projects, affected projects,
 source-of-truth rules, suggested validation commands, and unresolved changes:
 

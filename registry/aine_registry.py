@@ -535,12 +535,27 @@ def source_truth_rules(projects: list[dict[str, Any]], artifacts: list[dict[str,
     return []
 
 
-def findings(projects: list[dict[str, Any]], artifacts: list[dict[str, Any]], dependencies: list[dict[str, Any]], excluded: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def findings(projects: list[dict[str, Any]], artifacts: list[dict[str, Any]], dependencies: list[dict[str, Any]], excluded: list[dict[str, Any]], source_of_truth: list[dict[str, Any]] | None = None, raw_dependencies: list[dict[str, Any]] | None = None) -> list[dict[str, Any]]:
     result: list[dict[str, Any]] = []
     project_ids = {item["project_id"] for item in projects}
     for edge in dependencies:
         if edge["target"]["project_id"].startswith("external:") or edge["target"]["project_id"] not in project_ids:
             result.append({"finding_id": "DEP-001", "severity": "info", "category": "dependency", "status": "unknown", "subject": edge["dependency_id"], "message": f"Dependency provider is external or unresolved: {edge['target']['project_id']}", "evidence": edge["evidence"]})
+    sot_by_domain: dict[str, list[dict[str, Any]]] = {}
+    for rule in source_of_truth or []:
+        sot_by_domain.setdefault(str(rule.get("domain", "UNKNOWN")), []).append(rule)
+    for domain, rules in sorted(sot_by_domain.items()):
+        authorities = {json.dumps(rule.get("authority", {}), ensure_ascii=False, sort_keys=True) for rule in rules}
+        if len(authorities) > 1:
+            result.append({"finding_id": "SOT-001", "severity": "medium", "category": "source_of_truth", "status": "conflict", "subject": domain, "message": f"Multiple authorities are declared for source-of-truth domain: {domain}", "evidence": sorted({evidence for rule in rules for evidence in rule.get("evidence", [])})})
+    edge_groups: dict[tuple[str, str, str], list[dict[str, Any]]] = {}
+    for edge in raw_dependencies or []:
+        key = (edge["source"]["project_id"], edge["target"]["project_id"], edge["kind"])
+        edge_groups.setdefault(key, []).append(edge)
+    for key, edges in sorted(edge_groups.items()):
+        states = {(edge.get("status"), edge.get("strength")) for edge in edges}
+        if len(states) > 1:
+            result.append({"finding_id": "REL-002", "severity": "medium", "category": "dependency", "status": "conflict", "subject": ":".join(key), "message": "Contradictory status or strength declarations exist for the same dependency edge", "evidence": sorted({evidence for edge in edges for evidence in edge.get("evidence", [])})})
     if excluded:
         result.append({"finding_id": "SCOPE-001", "severity": "info", "category": "scope", "status": "declared", "subject": "portfolio.exclusions", "message": "Projects explicitly excluded from the active registry scope are preserved as exclusions.", "evidence": [item["path"] for item in excluded]})
     return result
@@ -632,6 +647,7 @@ def discover(workspace_roots: list[Path], excluded_names: set[str] | None = None
         dependencies.extend(package_edges(item, portfolio_parent, workspace_root, p["project_id"], projects, package_index))
         dependencies.extend(text_edges(item, workspace_root, p["project_id"], active_root_paths, projects_by_root, projects))
     dependencies.extend(manifest_dependencies)
+    raw_dependencies = list(dependencies)
     grouped: dict[str, dict[str, Any]] = {}
     for edge in dependencies:
         grouping_key = json.dumps([edge["source"], edge["target"], edge["kind"], edge.get("reference", {})], ensure_ascii=False, sort_keys=True)
@@ -653,7 +669,7 @@ def discover(workspace_roots: list[Path], excluded_names: set[str] | None = None
         "source_of_truth": source_truth_rules(projects, artifacts) + manifest_source_truth, "findings": [], "exclusions": sorted(DEFAULT_IGNORES), "excluded_projects": excluded,
         "_local_roots": [{"root_id": item["root_id"], "local_path": item["local_path"]} for item in root_records],
     }
-    snapshot["findings"] = findings(projects, artifacts, dependencies, excluded)
+    snapshot["findings"] = findings(projects, artifacts, dependencies, excluded, snapshot["source_of_truth"], raw_dependencies)
     snapshot["snapshot_id"] = snapshot_hash(snapshot)
     return portable_snapshot(snapshot)
 
