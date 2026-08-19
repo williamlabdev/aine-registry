@@ -900,19 +900,28 @@ def markdown_preflight(report: dict[str, Any]) -> str:
     else:
         lines.append("- None")
     lines.extend(["", "## Policy"])
+    lines.append(f"- Mode: **{report['policy'].get('mode', 'advisory')}**")
     lines.append(f"- Status: **{report['policy']['status']}**")
+    lines.append(f"- Enforced failure: **{str(report['policy'].get('enforced_failure', False)).lower()}**")
     for check in report["policy"]["checks"]:
         lines.append(f"- `{check['project_id']}` `{check['rule']}` — **{check['status']}**: {check['message']}")
     return "\n".join(lines) + "\n"
 
 
-def evaluate_policy(projects: list[dict[str, Any]], validation: list[dict[str, Any]], unresolved_changes: list[str], risk: dict[str, Any]) -> dict[str, Any]:
+def evaluate_policy(projects: list[dict[str, Any]], validation: list[dict[str, Any]], unresolved_changes: list[str], risk: dict[str, Any], unknowns: list[dict[str, Any]] | None = None, mode_override: str | None = None) -> dict[str, Any]:
     checks: list[dict[str, Any]] = []
+    modes: set[str] = set()
     for project in projects:
         policy = project.get("policy", {})
         if not isinstance(policy, dict):
             continue
         project_id = project["project_id"]
+        declared_mode = str(policy.get("mode", "advisory")).lower()
+        effective_mode = mode_override or declared_mode
+        if effective_mode not in {"advisory", "enforced"}:
+            checks.append({"project_id": project_id, "rule": "policy_mode", "status": "fail", "message": f"unsupported policy mode: {effective_mode}"})
+            effective_mode = "advisory"
+        modes.add(effective_mode)
         required_risks = {str(item).lower() for item in policy.get("require_approval_for", [])}
         if required_risks and risk["level"] in required_risks:
             checks.append({"project_id": project_id, "rule": "require_approval_for", "status": "review_required", "message": f"risk level {risk['level']} requires human approval"})
@@ -926,11 +935,26 @@ def evaluate_policy(projects: list[dict[str, Any]], validation: list[dict[str, A
             checks.append({"project_id": project_id, "rule": "policy", "status": "pass", "message": "no declared policy violation"})
     statuses = {check["status"] for check in checks}
     status = "fail" if "fail" in statuses else ("review_required" if "review_required" in statuses else "pass")
-    return {"status": status, "checks": checks, "advisory_only": True}
+    mode = "enforced" if "enforced" in modes else (mode_override or "advisory")
+    evidence = {
+        "unresolved_changes": list(unresolved_changes),
+        "finding_ids": [item.get("finding_id", "UNKNOWN") for item in (unknowns or [])],
+    }
+    enforced_failure = mode == "enforced" and status != "pass"
+    return {
+        "mode": mode,
+        "status": status,
+        "checks": checks,
+        "evidence": evidence,
+        "enforced_failure": enforced_failure,
+        "exit_code": 1 if enforced_failure else 0,
+        "advisory_only": mode != "enforced",
+    }
 
 
 def handoff_from_preflight(report: dict[str, Any]) -> dict[str, Any]:
-    requires_review = report["risk"]["approval_required"] or bool(report["unknowns"]) or report["policy"]["status"] != "pass"
+    policy = report.get("policy", {"mode": "advisory", "status": "pass", "enforced_failure": False})
+    requires_review = report["risk"]["approval_required"] or bool(report["unknowns"]) or policy["status"] != "pass" or policy.get("enforced_failure", False)
     return {
         "schema": "aine.handoff.v1",
         "handoff_id": stable_id("handoff", report["evidence"]["evidence_id"]),
@@ -939,15 +963,15 @@ def handoff_from_preflight(report: dict[str, Any]) -> dict[str, Any]:
         "changes": report["changes"],
         "affected_projects": [{"project_id": p["project_id"], "owner": p.get("owner", "UNKNOWN")} for p in report["affected_projects"]],
         "risk": report["risk"],
-        "policy": report["policy"],
+        "policy": policy,
         "required_validation": report["required_validation"],
         "unknowns": report["unknowns"],
-        "next_actions": (["Review risk and unknown relationships", "Run required validation"] if requires_review else ["Run required validation", "Review and merge when checks pass"]),
+        "next_actions": ((["Enforced policy failed; review policy evidence", "Review risk and unknown relationships", "Run required validation"] if policy.get("enforced_failure", False) else ["Review risk and unknown relationships", "Run required validation"]) if requires_review else ["Run required validation", "Review and merge when checks pass"]),
         "read_only": True,
     }
 
 
-def preflight(snapshot: dict[str, Any], changes: list[str], roots: list[Path]) -> dict[str, Any]:
+def preflight(snapshot: dict[str, Any], changes: list[str], roots: list[Path], policy_mode: str | None = None) -> dict[str, Any]:
     matched_projects: list[dict[str, Any]] = []
     matched_artifacts: list[dict[str, Any]] = []
     unresolved: list[str] = []
@@ -984,7 +1008,7 @@ def preflight(snapshot: dict[str, Any], changes: list[str], roots: list[Path]) -
     if not matched_projects and not matched_artifacts:
         unknowns.append({"finding_id": "PREFLIGHT-002", "severity": "high", "category": "boundary", "status": "human_review_required", "subject": "change_scope", "message": "The change is outside the known registry boundary; do not assume it is safe to modify.", "evidence": changes})
     risk = risk_report(affected_projects, matched_artifacts)
-    policy = evaluate_policy(affected_projects, validation, unresolved, risk)
+    policy = evaluate_policy(affected_projects, validation, unresolved, risk, unknowns, policy_mode)
     report = {
         "changes": changes,
         "matched_projects": matched_projects,
@@ -1010,6 +1034,9 @@ def preflight(snapshot: dict[str, Any], changes: list[str], roots: list[Path]) -
             "affected_projects": [p["project_id"] for p in affected_projects],
             "matched_artifacts": [a["artifact_id"] for a in matched_artifacts],
             "policy_status": policy["status"],
+            "policy_mode": policy["mode"],
+            "policy_enforced_failure": policy["enforced_failure"],
+            "policy_evidence": policy["evidence"],
         },
     }
     return report
@@ -1059,7 +1086,7 @@ def command(args: argparse.Namespace) -> int:
             changes, git_sources = git_change_set(snapshot, roots, mode, args.base)
             change_source = mode
         if not changes: print("preflight requires at least one --change", file=sys.stderr); return 2
-        report = preflight(snapshot, changes, roots)
+        report = preflight(snapshot, changes, roots, getattr(args, "policy_mode", None))
         report["change_source"] = change_source
         report["git_sources"] = git_sources
         if args.output:
@@ -1068,11 +1095,12 @@ def command(args: argparse.Namespace) -> int:
             content = markdown_preflight(report) if args.format == "markdown" else json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
             output.write_text(content, encoding="utf-8")
             print_json({"status": "written", "format": args.format, "evidence_id": report["evidence"]["evidence_id"]})
-            return 0
+            return report["policy"]["exit_code"]
         if args.format == "markdown":
             print(markdown_preflight(report), end="")
         else:
             print_json(report)
+        return report["policy"]["exit_code"]
     elif action == "workspace": print_json(snapshot["portfolio"]["workspace_roots"])
     elif action == "context":
         selected = snapshot["projects"]
@@ -1158,7 +1186,7 @@ def parser() -> argparse.ArgumentParser:
     dependency = sub.add_parser("dependency"); dependency.add_argument("subcommand", nargs="?")
     sot = sub.add_parser("source-of-truth"); sot.add_argument("domain")
     impact_cmd = sub.add_parser("impact"); impact_cmd.add_argument("target", nargs="?"); impact_cmd.add_argument("--project"); impact_cmd.add_argument("--path"); impact_cmd.add_argument("--artifact"); add_workspace_options(impact_cmd)
-    preflight_cmd = sub.add_parser("preflight", help="analyze a proposed change without mutating the workspace"); preflight_cmd.add_argument("--change", action="append", help="changed path, artifact, or project; repeat as needed"); preflight_cmd.add_argument("--diff", action="store_true", help="read staged and unstaged changes from Git"); preflight_cmd.add_argument("--staged", action="store_true", help="read staged changes from Git"); preflight_cmd.add_argument("--base", help="compare each checkout against BASE...HEAD"); preflight_cmd.add_argument("--format", choices=("json", "markdown"), default="json"); preflight_cmd.add_argument("--output", help="write the preflight evidence report"); add_workspace_options(preflight_cmd)
+    preflight_cmd = sub.add_parser("preflight", help="analyze a proposed change without mutating the workspace"); preflight_cmd.add_argument("--change", action="append", help="changed path, artifact, or project; repeat as needed"); preflight_cmd.add_argument("--diff", action="store_true", help="read staged and unstaged changes from Git"); preflight_cmd.add_argument("--staged", action="store_true", help="read staged changes from Git"); preflight_cmd.add_argument("--base", help="compare each checkout against BASE...HEAD"); preflight_cmd.add_argument("--format", choices=("json", "markdown"), default="json"); preflight_cmd.add_argument("--output", help="write the preflight evidence report"); preflight_cmd.add_argument("--policy-mode", choices=("advisory", "enforced"), help="override project policy mode for this preflight"); add_workspace_options(preflight_cmd)
     portfolio = sub.add_parser("portfolio"); portfolio_sub = portfolio.add_subparsers(dest="portfolio_action", required=True); pd = portfolio_sub.add_parser("discover"); pd.add_argument("--root", dest="portfolio_roots", action="append"); pd.add_argument("--output"); portfolio_sub.add_parser("list")
     return p
 

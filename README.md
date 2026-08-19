@@ -162,6 +162,7 @@ Projects may also declare advisory policy in `.aine/registry.json`:
 {
   "project": {
     "policy": {
+      "mode": "advisory",
       "require_approval_for": ["high", "critical"],
       "deny_unknown_changes": true,
       "required_checks": ["test", "lint"]
@@ -171,8 +172,16 @@ Projects may also declare advisory policy in `.aine/registry.json`:
 ```
 
 Policy results are included in preflight, evidence, and handoff records. They
-can be `pass`, `review_required`, or `fail`, but remain advisory-only: the
-public core does not block edits, commits, CI, or deployment.
+can be `pass`, `review_required`, or `fail`. The default `advisory` mode always
+returns exit code 0. Opt into machine-readable enforcement for a run with:
+
+```bash
+aine preflight --root /path/to/workspace --diff --policy-mode enforced
+```
+
+In `enforced` mode, a non-`pass` policy returns exit code 1 and sets
+`policy.enforced_failure: true`; it still does not modify Git, files, CI, or
+deployment. A CLI mode override takes precedence over the project manifest.
 
 Save a machine-readable evidence bundle and create a handoff record:
 

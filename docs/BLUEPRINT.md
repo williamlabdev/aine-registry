@@ -117,8 +117,21 @@ v0.6 rules are intentionally small:
   discoverable for the affected project.
 
 The result is attached to the preflight report, evidence claims, and handoff.
-`fail` is an advisory finding in the public core; it does not prevent a user or
-another system from editing files, committing, running CI, or deploying.
+The default `advisory` mode does not prevent a user or another system from
+editing files, committing, running CI, or deploying.
+
+## Opt-in enforcement boundary
+
+Policy can opt into `mode: enforced` in the project manifest, or a caller can
+use `--policy-mode enforced` for one preflight. Enforcement is deliberately
+limited to the CLI contract: when policy status is not `pass`, AINE returns
+exit code `1`, sets `enforced_failure: true`, and preserves the policy checks
+and evidence. It does not modify Git, reject files, execute approvals, invoke
+deployment tools, or contact a hosted control plane.
+
+This is the boundary between local policy evaluation and future approval
+workflows. Approval, identity, and organization-level decisions remain outside
+the public core.
 
 ## CI integration boundary
 

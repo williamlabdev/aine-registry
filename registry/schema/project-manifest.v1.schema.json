@@ -13,7 +13,16 @@
         "capabilities": {"type": "array", "items": {"type": "string"}},
         "risk": {"type": "object"},
         "approval_required": {"type": "boolean"},
-        "policy": {"type": "object"}
+        "policy": {
+          "type": "object",
+          "properties": {
+            "mode": {"enum": ["advisory", "enforced"]},
+            "require_approval_for": {"type": "array", "items": {"type": "string"}},
+            "deny_unknown_changes": {"type": "boolean"},
+            "required_checks": {"type": "array", "items": {"type": "string"}}
+          },
+          "additionalProperties": true
+        }
       },
       "additionalProperties": true
     },

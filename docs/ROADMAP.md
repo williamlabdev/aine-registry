@@ -75,7 +75,8 @@ This roadmap describes product outcomes, not promises of automatic support for e
 
 ## Later — Control Plane
 
-- [ ] Enforced policy evaluation and approval workflows
+- [x] Opt-in enforced policy evaluation with machine-readable exit status
+- [ ] Approval workflows
 - [ ] Team ownership and RBAC
 - [ ] Audit evidence storage
 - [ ] Hosted or self-hosted portfolio views

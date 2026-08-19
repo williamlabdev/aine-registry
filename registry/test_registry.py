@@ -252,6 +252,7 @@ class MultiRootRegistryTests(unittest.TestCase):
                 "project": {
                     "owner": "platform-team",
                     "policy": {
+                        "mode": "advisory",
                         "require_approval_for": ["high"],
                         "deny_unknown_changes": True,
                         "required_checks": ["test"],
@@ -291,15 +292,47 @@ class MultiRootRegistryTests(unittest.TestCase):
             self.assertIn('"status": "written"', result.stdout)
             report = json.loads(evidence.read_text(encoding="utf-8"))
             self.assertEqual(report["evidence"]["schema"], "aine.evidence.v1")
+            self.assertEqual(report["policy"]["mode"], "advisory")
             self.assertEqual(report["policy"]["status"], "fail")
+            self.assertFalse(report["policy"]["enforced_failure"])
+            self.assertEqual(report["policy"]["exit_code"], 0)
+            self.assertEqual(report["evidence"]["claims"]["policy_mode"], "advisory")
+            self.assertFalse(report["evidence"]["claims"]["policy_enforced_failure"])
             self.assertTrue(any(check["rule"] == "required_checks" for check in report["policy"]["checks"]))
             handoff = subprocess.run([sys.executable, str(Path(__file__).parent / "aine_registry.py"), "handoff", "--preflight", str(evidence)], capture_output=True, text=True, check=True)
             handoff_data = json.loads(handoff.stdout)
             self.assertEqual(handoff_data["schema"], "aine.handoff.v1")
             self.assertEqual(handoff_data["status"], "human_review_required")
 
+            enforced_evidence = Path(temp) / "enforced-preflight.json"
+            enforced = subprocess.run([sys.executable, str(Path(__file__).parent / "aine_registry.py"), "preflight", "--root", str(root), "--diff", "--policy-mode", "enforced", "--output", str(enforced_evidence)], capture_output=True, text=True)
+            self.assertEqual(enforced.returncode, 1)
+            enforced_report = json.loads(enforced_evidence.read_text(encoding="utf-8"))
+            self.assertEqual(enforced_report["policy"]["mode"], "enforced")
+            self.assertTrue(enforced_report["policy"]["enforced_failure"])
+            self.assertEqual(enforced_report["policy"]["exit_code"], 1)
+            self.assertIn("required_checks", [check["rule"] for check in enforced_report["policy"]["checks"]])
+            enforced_handoff = subprocess.run([sys.executable, str(Path(__file__).parent / "aine_registry.py"), "handoff", "--preflight", str(enforced_evidence)], capture_output=True, text=True, check=True)
+            enforced_handoff_data = json.loads(enforced_handoff.stdout)
+            self.assertEqual(enforced_handoff_data["status"], "human_review_required")
+            self.assertEqual(enforced_handoff_data["policy"]["mode"], "enforced")
+
     def test_remote_credentials_are_not_exported(self):
         self.assertEqual(registry.normalized_remote("https://token:secret@example.test/org/repo.git"), "https://example.test/org/repo")
+
+    def test_manifest_enforced_policy_mode(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp) / "workspace"
+            make_git_project(root, "https://example.test/service.git", {"api.yaml": "openapi: 3.0.0\n"})
+            (root / ".aine").mkdir()
+            (root / ".aine" / "registry.json").write_text(json.dumps({
+                "project": {"policy": {"mode": "enforced", "required_checks": ["test"]}},
+            }), encoding="utf-8")
+            snapshot = registry.discover([root], excluded_names=set())
+            report = registry.preflight(snapshot, ["api.yaml"], [root])
+            self.assertEqual(report["policy"]["mode"], "enforced")
+            self.assertTrue(report["policy"]["enforced_failure"])
+            self.assertEqual(report["policy"]["exit_code"], 1)
 
     def test_excluded_project_is_not_active(self):
         with tempfile.TemporaryDirectory() as temp:

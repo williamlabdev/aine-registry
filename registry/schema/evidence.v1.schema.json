@@ -9,6 +9,14 @@
     "evidence_id": {"type": "string"},
     "kind": {"const": "preflight"},
     "snapshot_id": {"type": "string"},
-    "claims": {"type": "object"}
+    "claims": {
+      "type": "object",
+      "properties": {
+        "policy_mode": {"enum": ["advisory", "enforced"]},
+        "policy_status": {"enum": ["pass", "review_required", "fail"]},
+        "policy_enforced_failure": {"type": "boolean"},
+        "policy_evidence": {"type": "object"}
+      }
+    }
   }
 }
