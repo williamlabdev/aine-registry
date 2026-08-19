@@ -94,10 +94,17 @@ This roadmap describes product outcomes, not promises of automatic support for e
 - [x] Provide `aine approval --handoff` export
 - [x] Record external approval decisions without executing them
 
+## v1.0 — Stable Governance Core (released)
+
+- [x] Team ownership metadata with portable owner/delegate relationships
+- [x] Relationship-aware authorization for owners and delegated teams
+- [x] Evidence output directly consumable as `aine.evidence.v1`
+- [x] Collision-safe multi-root identities
+- [x] Explicit unresolved dynamic import evidence
+- [x] Local Go module import resolution and import alias normalization
+
 ## Later — Control Plane
 
-- [ ] Approval workflows
-- [ ] Team ownership, relationship-based access, and delegated authorization
 - [ ] Audit evidence storage
 - [ ] Hosted or self-hosted portfolio views
 - [ ] Enterprise retention and compliance integrations

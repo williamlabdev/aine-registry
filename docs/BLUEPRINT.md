@@ -225,8 +225,9 @@ policy may match a subject's roles (RBAC) and portable attributes on the
 subject, action, resource, or evaluation context (ABAC). Decisions are recorded
 as evidence and can affect preflight status, but identity providers, team
 directories, approval execution, and deployment authorization remain outside
-the core. Relationship-based ownership and delegation are future control-plane
-concerns.
+the core. Project ownership and delegated authorization are represented as
+portable declared relationships; external team directories and identity
+verification remain outside the core.
 
 ## Verification gates
 

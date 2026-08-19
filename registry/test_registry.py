@@ -40,6 +40,18 @@ class MultiRootRegistryTests(unittest.TestCase):
             self.assertTrue(any(a["root_id"] == "side-projects" and a["role"] == "generated" for a in snapshot["artifacts"]))
             self.assertTrue(any(e["scope"] == "cross_root" for e in snapshot["dependencies"]))
 
+    def test_same_named_workspace_roots_receive_unique_portable_ids(self):
+        with tempfile.TemporaryDirectory() as temp:
+            base = Path(temp)
+            first = base / "one" / "workspace"
+            second = base / "two" / "workspace"
+            make_git_project(first / "app", "https://example.test/first.git")
+            make_git_project(second / "app", "https://example.test/second.git")
+            snapshot = registry.discover([first, second], excluded_names=set())
+            self.assertEqual({root["root_id"] for root in snapshot["portfolio"]["workspace_roots"]}, {"workspace", "workspace-2"})
+            self.assertEqual({project["project_id"] for project in snapshot["projects"]}, {"workspace.app", "workspace-2.app"})
+            self.assertEqual(registry.snapshot_validation_errors(snapshot), [])
+
     def test_deterministic_hash_ignores_observed_time_and_local_path(self):
         with tempfile.TemporaryDirectory() as temp:
             base = Path(temp)
@@ -96,11 +108,13 @@ class MultiRootRegistryTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp) / "workspace"
             make_git_project(root / "app", "https://example.test/app.git", {
-                "py/app.py": "from .client import Client\nimport requests\n",
+                "py/app.py": "from .client import Client\nimport requests\nimport requests as req\n",
                 "py/client.py": "class Client: pass\n",
-                "web/index.ts": "import { value } from './util';\nconst x = require('lodash');\nconst y = import('@scope/events');\n",
+                "web/index.ts": "import { value } from './util';\nconst x = require('lodash');\nconst y = import('@scope/events');\nconst z = import(module_name);\n",
                 "web/util.ts": "export const value = 1;\n",
+                "go.mod": "module example.com/acme\n\ngo 1.22\n",
                 "cmd/main.go": "package main\nimport (\n  \"fmt\"\n  \"example.com/acme/dep\"\n)\n",
+                "dep/dep.go": "package dep\n",
                 "src/main.rs": "mod parser;\nuse serde::Deserialize;\n",
                 "src/parser.rs": "pub struct Parser;\n",
             })
@@ -110,10 +124,13 @@ class MultiRootRegistryTests(unittest.TestCase):
             self.assertTrue(any(item["specifier"] == ".client" and item["resolution"] == "local" for item in imports))
             self.assertTrue(any(item["specifier"] == "./util" and item["resolution"] == "local" for item in imports))
             self.assertTrue(any(item["specifier"] == "requests" and item["resolution"] == "external" for item in imports))
+            self.assertTrue(any(item["specifier"] == "requests" and item["target_project_id"] == "external:requests" for item in imports))
             self.assertTrue(any(item["specifier"] == "lodash" and item["resolution"] == "external" for item in imports))
             self.assertTrue(any(item["specifier"] == "lodash" and item["kind"] == "module_import" for item in imports))
             self.assertTrue(any(item["specifier"] == "@scope/events" and item["kind"] == "dynamic_import" for item in imports))
+            self.assertTrue(any(item["specifier"] == "module_name" and item["resolution"] == "unresolved" for item in imports))
             self.assertTrue(any(item["specifier"] == "fmt" and item["language"] == "go" for item in imports))
+            self.assertTrue(any(item["specifier"] == "example.com/acme/dep" and item["resolution"] == "local" for item in imports))
             self.assertTrue(any(item["specifier"] == "parser" and item["resolution"] == "local" for item in imports))
             self.assertTrue(any(item["specifier"] == "serde::Deserialize" and item["resolution"] == "external" for item in imports))
             self.assertEqual(registry.snapshot_validation_errors(snapshot), [])
@@ -153,23 +170,23 @@ class MultiRootRegistryTests(unittest.TestCase):
                     {"target": "workspace.provider", "kind": "runtime_api", "status": "active"},
                     {"target": "workspace.provider", "kind": "runtime_api", "status": "historical"},
                 ],
-                "relationships": [{"target": "workspace.provider", "relationship_type": "event_consumer", "status": "planned"}],
+                "relationships": [{"target": "workspace.provider", "relationship_type": "event_consumer", "status": "planned"}, {"target": "workspace.provider", "kind": "runtime_api", "status": "active"}],
             }), encoding="utf-8")
             snapshot = registry.discover([root], excluded_names=set())
             self.assertTrue(any(a["artifact_id"] == "provider-api" for a in snapshot["artifacts"]))
             self.assertTrue(any(e["target"]["project_id"] == "workspace.provider" and e["kind"] == "runtime_api" for e in snapshot["dependencies"]))
             self.assertTrue(any(e.get("relationship_type") == "event_consumer" and e["status"] == "planned" for e in snapshot["dependencies"]))
-            self.assertEqual(len(snapshot["relationships"]), 1)
+            self.assertEqual(len(snapshot["relationships"]), 2)
             result = subprocess.run([sys.executable, str(Path(__file__).parent / "aine_registry.py"), "relationships", "--root", str(root)], capture_output=True, text=True, check=True)
             self.assertIn('"relationship_type": "event_consumer"', result.stdout)
             filtered = subprocess.run([sys.executable, str(Path(__file__).parent / "aine_registry.py"), "relationships", "--root", str(root), "--relationship-status", "planned"], capture_output=True, text=True, check=True)
             self.assertIn('"relationship_type": "event_consumer"', filtered.stdout)
             empty = subprocess.run([sys.executable, str(Path(__file__).parent / "aine_registry.py"), "relationships", "--root", str(root), "--relationship-status", "active"], capture_output=True, text=True, check=True)
-            self.assertEqual(json.loads(empty.stdout), [])
+            self.assertEqual(len(json.loads(empty.stdout)), 1)
             context = subprocess.run([sys.executable, str(Path(__file__).parent / "aine_registry.py"), "context", "--root", str(root), "--project", "consumer"], capture_output=True, text=True, check=True)
             context_data = json.loads(context.stdout)
             self.assertEqual([item["name"] for item in context_data["projects"]], ["consumer"])
-            self.assertEqual(len(context_data["relationships"]), 1)
+            self.assertEqual(len(context_data["relationships"]), 2)
             report = registry.preflight(snapshot, ["provider/api.yaml"], [root])
             self.assertEqual([a["artifact_id"] for a in report["matched_artifacts"]], ["provider-api"])
             self.assertIn("workspace.consumer", {p["project_id"] for p in report["affected_projects"]})
@@ -318,6 +335,8 @@ class MultiRootRegistryTests(unittest.TestCase):
             self.assertIn('"status": "written"', result.stdout)
             report = json.loads(evidence.read_text(encoding="utf-8"))
             self.assertEqual(report["evidence"]["schema"], "aine.evidence.v1")
+            self.assertEqual(report["schema"], "aine.evidence.v1")
+            self.assertEqual(report["evidence_id"], report["evidence"]["evidence_id"])
             self.assertEqual(report["policy"]["mode"], "advisory")
             self.assertEqual(report["policy"]["status"], "fail")
             self.assertFalse(report["policy"]["enforced_failure"])
@@ -384,6 +403,7 @@ class MultiRootRegistryTests(unittest.TestCase):
             (root / ".aine").mkdir()
             (root / ".aine" / "registry.json").write_text(json.dumps({
                 "project": {
+                    "ownership": {"team": "platform", "owners": ["team:platform"], "delegates": ["platform"]},
                     "policy": {
                         "authorization": {
                             "rules": [{
@@ -392,6 +412,11 @@ class MultiRootRegistryTests(unittest.TestCase):
                                 "actions": ["preflight"],
                                 "roles": ["developer"],
                                 "conditions": {"subject.attributes.team": "platform", "resource.risk": "low"},
+                            }, {
+                                "id": "owned-preflight",
+                                "effect": "allow",
+                                "actions": ["preflight"],
+                                "requires_ownership": True,
                             }]
                         }
                     }
@@ -403,7 +428,14 @@ class MultiRootRegistryTests(unittest.TestCase):
                 "action": "preflight",
             })
             self.assertEqual(report["policy"]["authorization"]["status"], "pass")
-            self.assertEqual(report["policy"]["authorization"]["decisions"][0]["rule_id"], "platform-preflight")
+            self.assertEqual({item["rule_id"] for item in report["policy"]["authorization"]["decisions"]}, {"platform-preflight", "owned-preflight"})
+            delegated = registry.preflight(snapshot, ["README.md"], [root], authorization_context={
+                "subject": {"id": "agent.release", "roles": ["developer"], "teams": ["release"], "attributes": {}},
+                "action": "preflight",
+                "delegation": {"delegated_by": "platform"},
+            })
+            self.assertEqual(delegated["policy"]["authorization"]["status"], "pass")
+            self.assertEqual(delegated["policy"]["authorization"]["decisions"][0]["rule_id"], "owned-preflight")
 
     def test_enforced_policy_rejects_unknown_change_without_affected_project(self):
         with tempfile.TemporaryDirectory() as temp:

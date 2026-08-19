@@ -127,13 +127,23 @@ def root_id_for(path: Path) -> str:
     return name or "root"
 
 
-def project_id(root: Path, portfolio_root: Path, workspace_root: Path) -> str:
+def root_identifiers(paths: list[Path]) -> dict[str, str]:
+    counts: dict[str, int] = {}
+    result: dict[str, str] = {}
+    for path in paths:
+        base = root_id_for(path)
+        counts[base] = counts.get(base, 0) + 1
+        result[str(path)] = base if counts[base] == 1 else f"{base}-{counts[base]}"
+    return result
+
+
+def project_id(root: Path, portfolio_root: Path, workspace_root: Path, workspace_root_id: str | None = None) -> str:
     known: dict[str, str] = {}
     portfolio_key = rel(portfolio_root, root)
     if portfolio_key in known:
         return known[portfolio_key]
     local_key = rel(workspace_root, root)
-    return f"{root_id_for(workspace_root)}.{local_key.replace('/', '.') }".rstrip(".")
+    return f"{workspace_root_id or root_id_for(workspace_root)}.{local_key.replace('/', '.') }".rstrip(".")
 
 
 def discover_roots(workspace_root: Path, excluded: set[str]) -> tuple[list[Path], list[Path]]:
@@ -212,9 +222,10 @@ def file_hash(path: Path) -> dict[str, Any]:
     return {"status": "present", "hash": f"sha256:{h.hexdigest()}", "bytes": size}
 
 
-def project_record(root: Path, portfolio_root: Path, workspace_root: Path, repos: dict[str, dict[str, Any]]) -> dict[str, Any]:
-    pid = project_id(root, portfolio_root, workspace_root)
-    checkout_id = f"checkout.{root_id_for(workspace_root)}.{rel(workspace_root, root).replace('/', '.') }".rstrip(".")
+def project_record(root: Path, portfolio_root: Path, workspace_root: Path, repos: dict[str, dict[str, Any]], workspace_root_id: str | None = None) -> dict[str, Any]:
+    root_id = workspace_root_id or root_id_for(workspace_root)
+    pid = project_id(root, portfolio_root, workspace_root, root_id)
+    checkout_id = f"checkout.{root_id}.{rel(workspace_root, root).replace('/', '.') }".rstrip(".")
     repo = repos[checkout_id]
     instructions = [{"path": name, "role": "project_agent_instructions"} for name in sorted(INSTRUCTION_NAMES) if (root / name).exists()]
     commands: dict[str, Any] = {}
@@ -230,13 +241,12 @@ def project_record(root: Path, portfolio_root: Path, workspace_root: Path, repos
         text = read_text(root / "Makefile")
         for name in ("build", "test", "test-e2e", "lint", "verify"):
             if re.search(rf"^\s*{re.escape(name)}\s*:", text, re.MULTILINE): commands[name] = {"command": f"make {name}", "evidence": "Makefile"}
-    root_id = root_id_for(workspace_root)
     path = rel(workspace_root, root)
     return {
         "project_id": pid, "root_id": root_id, "repository_id": repo["repository_id"], "checkout_id": checkout_id,
         "name": root.name, "path": path, "root": path, "kind": classify_project(root),
         "git": repo["git"], "runtime": runtime_metadata(root), "instructions": instructions,
-        "commands": commands, "owner": "UNKNOWN", "capabilities": [], "risk": {"default": "low", "high_risk_paths": []}, "approval_required": False, "policy": {}, "deployment": [],
+        "commands": commands, "owner": "UNKNOWN", "ownership": {"team": "UNKNOWN", "owners": [], "delegates": []}, "capabilities": [], "risk": {"default": "low", "high_risk_paths": []}, "approval_required": False, "policy": {}, "deployment": [],
         "evidence": [f"{path}/{name}" for name in sorted(MANIFEST_NAMES | INSTRUCTION_NAMES) if (root / name).exists()],
     }
 
@@ -387,6 +397,13 @@ def explicit_manifest_records(project: dict[str, Any], project_root: Path, works
     project_metadata = data.get("project", {})
     if isinstance(project_metadata, dict):
         project["owner"] = project_metadata.get("owner", project.get("owner", "UNKNOWN"))
+        ownership = project_metadata.get("ownership", project.get("ownership", {}))
+        if isinstance(ownership, dict):
+            project["ownership"] = {
+                "team": str(ownership.get("team", project.get("ownership", {}).get("team", "UNKNOWN"))),
+                "owners": [str(item) for item in ownership.get("owners", project.get("ownership", {}).get("owners", []))],
+                "delegates": [str(item) for item in ownership.get("delegates", project.get("ownership", {}).get("delegates", []))],
+            }
         project["capabilities"] = project_metadata.get("capabilities", project.get("capabilities", []))
         project["risk"] = {**project.get("risk", {}), **project_metadata.get("risk", {})} if isinstance(project_metadata.get("risk", {}), dict) else project.get("risk", {})
         project["approval_required"] = bool(project_metadata.get("approval_required", project.get("approval_required", False)))
@@ -418,8 +435,8 @@ def explicit_manifest_records(project: dict[str, Any], project_root: Path, works
             "evidence": [evidence],
         })
     dependencies: list[dict[str, Any]] = []
-    declared_relationships = list(data.get("dependencies", [])) + list(data.get("relationships", []))
-    for item in declared_relationships:
+    declared_relationships = [(item, False) for item in data.get("dependencies", [])] + [(item, True) for item in data.get("relationships", [])]
+    for item, is_relationship in declared_relationships:
         if not isinstance(item, dict) or not item.get("target"):
             continue
         target_value = str(item["target"])
@@ -429,8 +446,8 @@ def explicit_manifest_records(project: dict[str, Any], project_root: Path, works
             project["project_id"], target_id, str(item.get("kind", item.get("relationship_type", "declared"))), str(item.get("strength", "required")), str(item.get("status", "declared")),
             evidence, {"manifest": evidence, "target": target_value}, projects, target_project,
         )
-        if item.get("relationship_type"):
-            edge["relationship_type"] = str(item["relationship_type"])
+        if is_relationship or item.get("relationship_type"):
+            edge["relationship_type"] = str(item.get("relationship_type", item.get("kind", "declared")))
             edge["relationship_source"] = "manifest"
         dependencies.append(edge)
     source_rules: list[dict[str, Any]] = []
@@ -532,7 +549,7 @@ def import_candidates(base: Path, specifier: str, extensions: tuple[str, ...]) -
     return [target, *[Path(f"{target}{extension}") for extension in extensions], *[target / f"index{extension}" for extension in extensions], target / "__init__.py"]
 
 
-def resolve_import_path(source: Path, specifier: str, root: Path, language: str) -> Path | None:
+def resolve_import_path(source: Path, specifier: str, root: Path, language: str, go_module: str | None = None) -> Path | None:
     if language == "python":
         if specifier.startswith("."):
             dots = len(specifier) - len(specifier.lstrip("."))
@@ -548,6 +565,14 @@ def resolve_import_path(source: Path, specifier: str, root: Path, language: str)
         if not specifier.startswith("."):
             return None
         candidates = import_candidates(source.parent, specifier, (".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs"))
+    elif language == "go":
+        if not go_module or specifier != go_module and not specifier.startswith(f"{go_module}/"):
+            return None
+        suffix = specifier.removeprefix(go_module).lstrip("/")
+        package_root = root / suffix
+        if package_root.is_dir():
+            return next((candidate.resolve() for candidate in sorted(package_root.glob("*.go")) if candidate.is_file()), None)
+        return package_root.resolve() if package_root.is_file() else None
     elif language == "rust":
         if specifier.startswith("crate::"):
             module = specifier.removeprefix("crate::").replace("::", "/")
@@ -578,6 +603,7 @@ def module_import_records(root: Path, workspace_root: Path, project: dict[str, A
             (re.compile(r"^\s*import\s*[\"']([^\"']+)[\"']", re.MULTILINE), "static"),
             (re.compile(r"\brequire\(\s*[\"']([^\"']+)[\"']\s*\)", re.MULTILINE), "static"),
             (re.compile(r"\bimport\(\s*[\"']([^\"']+)[\"']\s*\)", re.MULTILINE), "dynamic"),
+            (re.compile(r"\bimport\(\s*([A-Za-z_$][\w$]*)\s*\)", re.MULTILINE), "dynamic_unresolved"),
         ],
         "go": [(re.compile(r"\bimport\s*(?:\(\s*(.*?)\)|[\"']([^\"']+)[\"'])", re.DOTALL), "static")],
         "rust": [
@@ -586,6 +612,11 @@ def module_import_records(root: Path, workspace_root: Path, project: dict[str, A
             (re.compile(r"^\s*mod\s+([A-Za-z_][\w]*)\s*;", re.MULTILINE), "static"),
         ],
     }
+    go_module = None
+    go_mod = root / "go.mod"
+    if go_mod.exists():
+        module_match = re.search(r"^\s*module\s+(\S+)", read_text(go_mod), re.MULTILINE)
+        go_module = module_match.group(1) if module_match else None
     for current, dirs, files in os.walk(root):
         dirs[:] = [directory for directory in dirs if directory not in DEFAULT_IGNORES and directory not in SCAN_SKIP_DIRS]
         for filename in files:
@@ -601,7 +632,7 @@ def module_import_records(root: Path, workspace_root: Path, project: dict[str, A
                 for match in pattern.finditer(text):
                     values = [value for value in match.groups() if value]
                     if language == "python":
-                        values = [part.strip() for value in values for part in value.split(",") if part.strip()]
+                        values = [re.split(r"\s+as\s+", part.strip(), maxsplit=1)[0].strip() for value in values for part in value.split(",") if part.strip()]
                     if language == "go" and values and "\n" in values[0]:
                         values = re.findall(r"[\"']([^\"']+)[\"']", values[0])
                     imports.extend((value, import_kind) for value in values)
@@ -610,12 +641,15 @@ def module_import_records(root: Path, workspace_root: Path, project: dict[str, A
                 if (specifier, import_kind) in seen:
                     continue
                 seen.add((specifier, import_kind))
-                local_target = resolve_import_path(path, specifier, root, language)
+                local_target = resolve_import_path(path, specifier, root, language, go_module)
                 target_project = project_for_path(local_target, roots, projects_by_root) if local_target else None
                 resolution = "local" if local_target else "unresolved"
                 target_path = rel(target_project_root, local_target) if local_target and (target_project_root := next((candidate for candidate in roots if local_target == candidate.resolve() or candidate.resolve() in local_target.parents), None)) else None
                 target_id = target_project["project_id"] if target_project else None
-                if not local_target and not specifier.startswith("."):
+                if import_kind == "dynamic_unresolved":
+                    target_id = "external:UNKNOWN"
+                    resolution = "unresolved"
+                elif not local_target and not specifier.startswith("."):
                     package = package_name(specifier)
                     target_id = package_index.get(package, f"external:{package}")
                     resolution = "workspace_package" if package in package_index else "external"
@@ -628,7 +662,7 @@ def module_import_records(root: Path, workspace_root: Path, project: dict[str, A
                     "source_path": rel(root, path),
                     "language": language,
                     "specifier": specifier,
-                    "kind": "dynamic_import" if import_kind == "dynamic" else "module_import",
+                    "kind": "dynamic_import" if import_kind in {"dynamic", "dynamic_unresolved"} else "module_import",
                     "resolution": resolution,
                     "target_project_id": target_id,
                     "target_path": target_path,
@@ -697,7 +731,8 @@ def discover(workspace_roots: list[Path], excluded_names: set[str] | None = None
     excluded_names = set(excluded_names or DEFAULT_EXCLUDED_PROJECTS)
     roots = [path.resolve() for path in workspace_roots]
     portfolio_parent = Path(os.path.commonpath([str(path) for path in roots]))
-    root_records = [{"root_id": root_id_for(root), "name": root.name, "path": rel(portfolio_parent, root) or ".", "local_path": str(root), "trust_boundary": "local_workspace", "deployment_boundary": "UNKNOWN", "git_boundary": "independent_git_roots"} for root in roots]
+    root_ids = root_identifiers(roots)
+    root_records = [{"root_id": root_ids[str(root)], "name": root.name, "path": rel(portfolio_parent, root) or ".", "local_path": str(root), "trust_boundary": "local_workspace", "deployment_boundary": "UNKNOWN", "git_boundary": "independent_git_roots"} for root in roots]
     all_projects: list[Path] = []; excluded_paths: list[Path] = []
     root_for_project: dict[str, Path] = {}
     for workspace_root in roots:
@@ -707,14 +742,14 @@ def discover(workspace_roots: list[Path], excluded_names: set[str] | None = None
     all_projects = sorted(set(all_projects), key=lambda p: (len(p.parts), p.as_posix()))
     repo_records: dict[str, dict[str, Any]] = {}; projects_by_root: dict[str, dict[str, Any]] = {}
     for item in all_projects:
-        workspace_root = root_for_project[str(item)]; rid = root_id_for(workspace_root); path = rel(workspace_root, item)
+        workspace_root = root_for_project[str(item)]; rid = root_ids[str(workspace_root)]; path = rel(workspace_root, item)
         checkout_id = f"checkout.{rid}.{path.replace('/', '.') }".rstrip(".")
         gm = git_metadata(item); remote = gm["remote"]
         repository_id = f"repo.{hashlib.sha1(remote.encode()).hexdigest()[:12]}" if remote != "UNKNOWN" else f"repo.{rid}.{path.replace('/', '.') }".rstrip(".")
         repo_records[checkout_id] = {"repository_id": repository_id, "git": gm}
     for item in all_projects:
         workspace_root = root_for_project[str(item)]
-        record = project_record(item, portfolio_parent, workspace_root, repo_records)
+        record = project_record(item, portfolio_parent, workspace_root, repo_records, root_ids[str(workspace_root)])
         projects_by_root[str(item)] = record
     projects = sorted(projects_by_root.values(), key=lambda p: p["project_id"])
     active_ids = {p["project_id"] for p in projects}
@@ -781,6 +816,10 @@ def discover(workspace_roots: list[Path], excluded_names: set[str] | None = None
             grouped[grouping_key]["dependency_id"] = stable_id("dep", grouping_key)
         else:
             grouped[grouping_key]["evidence"] = sorted(set(grouped[grouping_key]["evidence"] + edge["evidence"]))[:100]
+            if edge.get("relationship_source") == "manifest":
+                grouped[grouping_key]["relationship_source"] = "manifest"
+                if edge.get("relationship_type"):
+                    grouped[grouping_key]["relationship_type"] = edge["relationship_type"]
     dependencies = sorted(grouped.values(), key=lambda e: e["dependency_id"])
     relationships = sorted((edge for edge in dependencies if edge.get("relationship_source") == "manifest"), key=lambda e: e["dependency_id"])
     excluded = [{"name": Path(path).name, "path": str(path), "reason": "excluded_from_active_registry"} for path in sorted(set(excluded_paths))]
@@ -850,6 +889,12 @@ def snapshot_validation_errors(snapshot: dict[str, Any]) -> list[str]:
     for index, project in enumerate(snapshot.get("projects", [])):
         if not isinstance(project, dict) or not project.get("project_id"):
             errors.append(f"projects[{index}] is missing project_id")
+    project_ids = [project.get("project_id") for project in snapshot.get("projects", []) if isinstance(project, dict)]
+    if len(project_ids) != len(set(project_ids)):
+        errors.append("projects contain duplicate project_id values")
+    root_ids = [root.get("root_id") for root in snapshot.get("portfolio", {}).get("workspace_roots", []) if isinstance(root, dict)]
+    if len(root_ids) != len(set(root_ids)):
+        errors.append("portfolio workspace_roots contain duplicate root_id values")
     for index, artifact in enumerate(snapshot.get("artifacts", [])):
         if not isinstance(artifact, dict) or not artifact.get("artifact_id") or not artifact.get("project_id"):
             errors.append(f"artifacts[{index}] is missing artifact_id or project_id")
@@ -1037,6 +1082,13 @@ def markdown_preflight(report: dict[str, Any]) -> str:
     return "\n".join(lines) + "\n"
 
 
+def evidence_record(report: dict[str, Any]) -> dict[str, Any]:
+    """Return a report that is also directly consumable as aine.evidence.v1."""
+    record = dict(report)
+    record.update(report["evidence"])
+    return record
+
+
 def authorization_value_matches(actual: Any, expected: Any) -> bool:
     if isinstance(expected, list):
         expected_values = {str(item) for item in expected}
@@ -1073,9 +1125,23 @@ def evaluate_authorization(projects: list[dict[str, Any]], context: dict[str, An
             roles = rule.get("roles", [])
             if roles and not set(str(role) for role in roles).intersection(context.get("subject", {}).get("roles", [])):
                 continue
+            teams = rule.get("teams", [])
+            subject_attributes = context.get("subject", {}).get("attributes", {})
+            subject_teams = set(str(item) for item in context.get("subject", {}).get("teams", []))
+            if subject_attributes.get("team"):
+                subject_teams.add(str(subject_attributes["team"]))
+            if teams and not set(str(team) for team in teams).intersection(subject_teams):
+                continue
             actions = rule.get("actions", [])
             if actions and context.get("action") not in {str(action) for action in actions}:
                 continue
+            if rule.get("requires_ownership"):
+                resource = context.get("resource", {})
+                owner_teams = {str(item) for item in resource.get("owner_teams", [])}
+                delegate_teams = {str(item) for item in resource.get("delegate_teams", [])}
+                delegated_by = str(context.get("delegation", {}).get("delegated_by", ""))
+                if not subject_teams.intersection(owner_teams) and not delegated_by in delegate_teams:
+                    continue
             conditions = rule.get("conditions", {})
             if not isinstance(conditions, dict) or not all(authorization_value_matches(authorization_lookup(context, str(path)), expected) for path, expected in conditions.items()):
                 continue
@@ -1228,8 +1294,16 @@ def preflight(snapshot: dict[str, Any], changes: list[str], roots: list[Path], p
     context = {
         "subject": supplied_context.get("subject", {"id": "anonymous", "roles": [], "attributes": {}}),
         "action": supplied_context.get("action", "preflight"),
-        "resource": {"type": "change_set", "risk": risk.get("level"), "project_ids": [project["project_id"] for project in affected_projects], **supplied_context.get("resource", {})},
+        "resource": {
+            "type": "change_set",
+            "risk": risk.get("level"),
+            "project_ids": [project["project_id"] for project in affected_projects],
+            "owner_teams": sorted({project.get("ownership", {}).get("team", "UNKNOWN") for project in affected_projects}),
+            "delegate_teams": sorted({delegate for project in affected_projects for delegate in project.get("ownership", {}).get("delegates", [])}),
+            **supplied_context.get("resource", {}),
+        },
         "context": {"evidence_status": "complete" if not unknowns else "unknown", **supplied_context.get("context", {})},
+        "delegation": supplied_context.get("delegation", {}),
     }
     policy = evaluate_policy(affected_projects, validation, unresolved, risk, unknowns, policy_mode, context)
     report = {
@@ -1363,8 +1437,9 @@ def command(args: argparse.Namespace) -> int:
                 key, value = item.split("=", 1)
                 attributes[key] = value
         authorization_context = {
-            "subject": {"id": getattr(args, "subject_id", None) or "anonymous", "roles": list(getattr(args, "role", []) or []), "attributes": attributes},
+            "subject": {"id": getattr(args, "subject_id", None) or "anonymous", "roles": list(getattr(args, "role", []) or []), "teams": list(getattr(args, "team", []) or []), "attributes": attributes},
             "action": "preflight",
+            "delegation": {"delegated_by": getattr(args, "delegated_by", None) or ""},
         }
         report = preflight(snapshot, changes, roots, getattr(args, "policy_mode", None), authorization_context)
         report["change_source"] = change_source
@@ -1372,7 +1447,7 @@ def command(args: argparse.Namespace) -> int:
         if args.output:
             output = Path(args.output).expanduser().resolve()
             output.parent.mkdir(parents=True, exist_ok=True)
-            content = markdown_preflight(report) if args.format == "markdown" else json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
+            content = markdown_preflight(report) if args.format == "markdown" else json.dumps(evidence_record(report), ensure_ascii=False, indent=2, sort_keys=True) + "\n"
             output.write_text(content, encoding="utf-8")
             print_json({"status": "written", "format": args.format, "evidence_id": report["evidence"]["evidence_id"]})
             return report["policy"]["exit_code"]
@@ -1457,7 +1532,7 @@ def parser() -> argparse.ArgumentParser:
     dependency = sub.add_parser("dependency"); dependency.add_argument("subcommand", nargs="?")
     sot = sub.add_parser("source-of-truth"); sot.add_argument("domain")
     impact_cmd = sub.add_parser("impact"); impact_cmd.add_argument("target", nargs="?"); impact_cmd.add_argument("--project"); impact_cmd.add_argument("--path"); impact_cmd.add_argument("--artifact"); add_workspace_options(impact_cmd)
-    preflight_cmd = sub.add_parser("preflight", help="analyze a proposed change without mutating the workspace"); preflight_cmd.add_argument("--change", action="append", help="changed path, artifact, or project; repeat as needed"); preflight_cmd.add_argument("--diff", action="store_true", help="read staged and unstaged changes from Git"); preflight_cmd.add_argument("--staged", action="store_true", help="read staged changes from Git"); preflight_cmd.add_argument("--base", help="compare each checkout against BASE...HEAD"); preflight_cmd.add_argument("--format", choices=("json", "markdown"), default="json"); preflight_cmd.add_argument("--output", help="write the preflight evidence report"); preflight_cmd.add_argument("--policy-mode", choices=("advisory", "enforced"), help="override project policy mode for this preflight"); preflight_cmd.add_argument("--subject-id", help="portable subject identifier for policy evaluation"); preflight_cmd.add_argument("--role", action="append", help="subject role; repeat as needed"); preflight_cmd.add_argument("--attribute", action="append", help="subject attribute as key=value; repeat as needed"); add_workspace_options(preflight_cmd)
+    preflight_cmd = sub.add_parser("preflight", help="analyze a proposed change without mutating the workspace"); preflight_cmd.add_argument("--change", action="append", help="changed path, artifact, or project; repeat as needed"); preflight_cmd.add_argument("--diff", action="store_true", help="read staged and unstaged changes from Git"); preflight_cmd.add_argument("--staged", action="store_true", help="read staged changes from Git"); preflight_cmd.add_argument("--base", help="compare each checkout against BASE...HEAD"); preflight_cmd.add_argument("--format", choices=("json", "markdown"), default="json"); preflight_cmd.add_argument("--output", help="write the preflight evidence report"); preflight_cmd.add_argument("--policy-mode", choices=("advisory", "enforced"), help="override project policy mode for this preflight"); preflight_cmd.add_argument("--subject-id", help="portable subject identifier for policy evaluation"); preflight_cmd.add_argument("--role", action="append", help="subject role; repeat as needed"); preflight_cmd.add_argument("--team", action="append", help="subject team; repeat as needed"); preflight_cmd.add_argument("--delegated-by", help="team or owner delegating this action"); preflight_cmd.add_argument("--attribute", action="append", help="subject attribute as key=value; repeat as needed"); add_workspace_options(preflight_cmd)
     portfolio = sub.add_parser("portfolio"); portfolio_sub = portfolio.add_subparsers(dest="portfolio_action", required=True); pd = portfolio_sub.add_parser("discover"); pd.add_argument("--root", dest="portfolio_roots", action="append"); pd.add_argument("--output"); portfolio_sub.add_parser("list")
     return p
 

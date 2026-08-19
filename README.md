@@ -244,6 +244,24 @@ aine approval --handoff handoff.json \
 AINE records the supplied decision as external input; it does not contact an
 identity, ticketing, merge, or deployment system.
 
+Projects can declare portable ownership and delegated teams:
+
+```json
+{
+  "project": {
+    "ownership": {
+      "team": "platform",
+      "owners": ["team:platform"],
+      "delegates": ["release"]
+    }
+  }
+}
+```
+
+Authorization rules may use `teams` or `requires_ownership`. The caller can
+provide `--team` and `--delegated-by` during preflight. These are evidence
+inputs for policy evaluation, not identity verification.
+
 ## GitHub Actions integration
 
 The repository includes a reference workflow at
