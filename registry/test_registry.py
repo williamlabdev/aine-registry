@@ -379,6 +379,27 @@ class MultiRootRegistryTests(unittest.TestCase):
             self.assertEqual(enforced_handoff_data["status"], "human_review_required")
             self.assertEqual(enforced_handoff_data["policy"]["mode"], "enforced")
 
+    def test_local_evidence_store_round_trip_and_integrity(self):
+        with tempfile.TemporaryDirectory() as temp:
+            base = Path(temp)
+            record = {"schema": "aine.evidence.v1", "evidence_id": "evidence.store", "kind": "preflight", "snapshot_id": "snapshot.store", "claims": {"policy_status": "pass"}}
+            input_path = base / "evidence.json"
+            store = base / "evidence-store"
+            input_path.write_text(json.dumps(record), encoding="utf-8")
+            stored = subprocess.run([sys.executable, str(Path(__file__).parent / "aine_registry.py"), "evidence", "store", "--input", str(input_path), "--store", str(store)], capture_output=True, text=True, check=True)
+            stored_data = json.loads(stored.stdout)
+            self.assertEqual(stored_data["status"], "stored")
+            listed = subprocess.run([sys.executable, str(Path(__file__).parent / "aine_registry.py"), "evidence", "list", "--store", str(store)], capture_output=True, text=True, check=True)
+            self.assertEqual(json.loads(listed.stdout)[0]["record_id"], stored_data["record_id"])
+            fetched = subprocess.run([sys.executable, str(Path(__file__).parent / "aine_registry.py"), "evidence", "get", "--id", stored_data["record_id"], "--store", str(store)], capture_output=True, text=True, check=True)
+            self.assertEqual(json.loads(fetched.stdout), record)
+            stored_path = store / f"{stored_data['record_id'].removeprefix('sha256:')}.json"
+            tampered = json.loads(stored_path.read_text(encoding="utf-8"))
+            tampered["record"]["claims"]["policy_status"] = "fail"
+            stored_path.write_text(json.dumps(tampered), encoding="utf-8")
+            invalid = subprocess.run([sys.executable, str(Path(__file__).parent / "aine_registry.py"), "evidence", "list", "--store", str(store)], capture_output=True, text=True, check=True)
+            self.assertEqual(json.loads(invalid.stdout)[0]["status"], "invalid")
+
     def test_remote_credentials_are_not_exported(self):
         self.assertEqual(registry.normalized_remote("https://token:secret@example.test/org/repo.git"), "https://example.test/org/repo")
 

@@ -244,6 +244,18 @@ aine approval --handoff handoff.json \
 AINE records the supplied decision as external input; it does not contact an
 identity, ticketing, merge, or deployment system.
 
+Evidence can be retained in a local, append-only, content-addressed store:
+
+```bash
+aine evidence store --input preflight.json --store .aine/evidence
+aine evidence list --store .aine/evidence
+aine evidence get --id sha256:<digest> --store .aine/evidence
+```
+
+The store verifies each record's digest on read and reports tampered records as
+invalid. It has no database or hosted-service dependency and only writes to the
+explicit store directory supplied by the caller.
+
 Projects can declare portable ownership and delegated teams:
 
 ```json

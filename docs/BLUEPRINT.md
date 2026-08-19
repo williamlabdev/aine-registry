@@ -112,6 +112,15 @@ decisions, identity, ticketing, merge, and deployment actions remain external.
 An external decision may be recorded as input with its actor identity, but the
 registry does not execute or verify that decision.
 
+## Local evidence store
+
+The core provides a local evidence store for explicit retention of registry,
+preflight, handoff, and approval records. Each record is content-addressed by
+its canonical JSON digest and written as an immutable file; reads verify the
+digest and expose tampered files as invalid. The store is intentionally
+dependency-free and local. Hosted storage, retention policy enforcement, and
+compliance export remain outside the public core.
+
 ## Advisory policy evaluation
 
 Project-local policy is declarative metadata consumed during preflight. The

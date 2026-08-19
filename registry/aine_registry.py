@@ -1089,6 +1089,81 @@ def evidence_record(report: dict[str, Any]) -> dict[str, Any]:
     return record
 
 
+EVIDENCE_STORE_SCHEMAS = {"aine.evidence.v1", "aine.handoff.v1", "aine.approval.v1", "aine.registry.v1"}
+
+
+def record_digest(record: dict[str, Any]) -> str:
+    encoded = json.dumps(record, ensure_ascii=False, separators=(",", ":"), sort_keys=True).encode()
+    return f"sha256:{hashlib.sha256(encoded).hexdigest()}"
+
+
+def load_store_record(path: Path) -> dict[str, Any]:
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(payload, dict) or not isinstance(payload.get("record"), dict) or not payload.get("record_id"):
+        raise ValueError("invalid evidence store envelope")
+    expected = record_digest(payload["record"])
+    if payload["record_id"] != expected:
+        raise ValueError("evidence store integrity check failed")
+    return payload
+
+
+def store_record(store_root: Path, record: dict[str, Any]) -> dict[str, Any]:
+    schema = record.get("schema")
+    if schema not in EVIDENCE_STORE_SCHEMAS:
+        raise ValueError(f"unsupported record schema: {schema or 'UNKNOWN'}")
+    digest = record_digest(record)
+    store_root.expanduser().mkdir(parents=True, exist_ok=True)
+    target = store_root.expanduser() / f"{digest.removeprefix('sha256:')}.json"
+    envelope = {"record_id": digest, "record": record}
+    encoded = json.dumps(envelope, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
+    if target.exists():
+        existing = load_store_record(target)
+        if existing["record_id"] != digest:
+            raise ValueError("evidence store collision detected")
+        return {"record_id": digest, "schema": schema, "status": "already_present"}
+    target.write_text(encoded, encoding="utf-8")
+    return {"record_id": digest, "schema": schema, "status": "stored"}
+
+
+def list_store_records(store_root: Path) -> list[dict[str, Any]]:
+    if not store_root.expanduser().is_dir():
+        return []
+    records: list[dict[str, Any]] = []
+    for path in sorted(store_root.expanduser().glob("*.json")):
+        try:
+            envelope = load_store_record(path)
+            record = envelope["record"]
+            records.append({"record_id": envelope["record_id"], "schema": record.get("schema", "UNKNOWN"), "path": path.name})
+        except (OSError, ValueError, json.JSONDecodeError) as exc:
+            records.append({"path": path.name, "status": "invalid", "error": str(exc)})
+    return records
+
+
+def command_evidence(args: argparse.Namespace) -> int:
+    store_root = Path(args.store).expanduser().resolve()
+    if args.evidence_action == "store":
+        try:
+            input_path = Path(args.input).expanduser()
+            source = json.loads(input_path.read_text(encoding="utf-8"))
+            nested_evidence = source.get("evidence") if isinstance(source, dict) else None
+            record = evidence_record(source) if isinstance(nested_evidence, dict) and nested_evidence.get("schema") == "aine.evidence.v1" and source.get("schema") != "aine.evidence.v1" else source
+            if not isinstance(record, dict):
+                raise ValueError("input record must be a JSON object")
+            print_json(store_record(store_root, record))
+        except (OSError, ValueError, json.JSONDecodeError) as exc:
+            print(f"could not store evidence: {exc}", file=sys.stderr); return 2
+    elif args.evidence_action == "list":
+        print_json(list_store_records(store_root))
+    elif args.evidence_action == "get":
+        record_id = args.id if args.id.startswith("sha256:") else f"sha256:{args.id}"
+        target = store_root / f"{record_id.removeprefix('sha256:')}.json"
+        try:
+            print_json(load_store_record(target)["record"])
+        except (OSError, ValueError, json.JSONDecodeError) as exc:
+            print(f"could not read evidence: {exc}", file=sys.stderr); return 2
+    return 0
+
+
 def authorization_value_matches(actual: Any, expected: Any) -> bool:
     if isinstance(expected, list):
         expected_values = {str(item) for item in expected}
@@ -1351,6 +1426,8 @@ def command(args: argparse.Namespace) -> int:
         return write_local_config(args)
     if args.action == "portfolio" and args.portfolio_action == "list":
         snapshot = load_snapshot(args); print_json(snapshot["portfolio"]); return 0
+    if args.action == "evidence":
+        return command_evidence(args)
     if args.action == "handoff" and getattr(args, "preflight", None):
         try:
             report = json.loads(Path(args.preflight).expanduser().read_text(encoding="utf-8"))
@@ -1529,6 +1606,16 @@ def parser() -> argparse.ArgumentParser:
     approval.add_argument("--output", help="write the approval request")
     approval.add_argument("--decision", choices=("approved", "rejected"), help="record an external decision without executing it")
     approval.add_argument("--decided-by", help="external subject that supplied the decision")
+    evidence = sub.add_parser("evidence", help="store and retrieve local evidence records")
+    evidence_sub = evidence.add_subparsers(dest="evidence_action", required=True)
+    evidence_store = evidence_sub.add_parser("store", help="store a JSON record in the local append-only store")
+    evidence_store.add_argument("--input", required=True, help="JSON evidence, handoff, approval, or registry record")
+    evidence_store.add_argument("--store", required=True, help="local evidence store directory")
+    evidence_list = evidence_sub.add_parser("list", help="list stored records")
+    evidence_list.add_argument("--store", required=True, help="local evidence store directory")
+    evidence_get = evidence_sub.add_parser("get", help="read and verify a stored record")
+    evidence_get.add_argument("--id", required=True, help="record ID or digest")
+    evidence_get.add_argument("--store", required=True, help="local evidence store directory")
     dependency = sub.add_parser("dependency"); dependency.add_argument("subcommand", nargs="?")
     sot = sub.add_parser("source-of-truth"); sot.add_argument("domain")
     impact_cmd = sub.add_parser("impact"); impact_cmd.add_argument("target", nargs="?"); impact_cmd.add_argument("--project"); impact_cmd.add_argument("--path"); impact_cmd.add_argument("--artifact"); add_workspace_options(impact_cmd)

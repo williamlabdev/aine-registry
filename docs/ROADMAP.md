@@ -103,9 +103,15 @@ This roadmap describes product outcomes, not promises of automatic support for e
 - [x] Explicit unresolved dynamic import evidence
 - [x] Local Go module import resolution and import alias normalization
 
+## v1.1 — Local Audit Evidence Store (released)
+
+- [x] Content-addressed local evidence records
+- [x] Append-only file creation with integrity verification
+- [x] `aine evidence store`, `list`, and `get` commands
+- [x] Tamper detection without runtime dependencies
+
 ## Later — Control Plane
 
-- [ ] Audit evidence storage
 - [ ] Hosted or self-hosted portfolio views
 - [ ] Enterprise retention and compliance integrations
 
