@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import inspect
 import os
 import subprocess
 import shutil
@@ -24,6 +25,19 @@ def make_git_project(path: Path, remote: str, files: dict[str, str] | None = Non
 
 
 class MultiRootRegistryTests(unittest.TestCase):
+    def test_public_facade_reexports_split_implementation_modules(self):
+        expected_modules = {
+            "discover": "discovery.py",
+            "preflight": "analysis.py",
+            "store_record": "evidence.py",
+            "portfolio_html": "view.py",
+            "main": "cli.py",
+        }
+        for name, expected_module in expected_modules.items():
+            source = inspect.getsourcefile(getattr(registry, name))
+            self.assertIsNotNone(source)
+            self.assertTrue(source.endswith(expected_module), (name, source))
+
     def test_cli_reports_version(self):
         result = subprocess.run([
             sys.executable, str(Path(__file__).parent / "aine_registry.py"), "--version",
