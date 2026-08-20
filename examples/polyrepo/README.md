@@ -18,8 +18,11 @@ checkout:
 
 ```bash
 cd examples/polyrepo
-sh setup.sh
+python3 setup.py
 ```
+
+On Windows PowerShell, use `py setup.py`. The `setup.sh` wrapper remains
+available for Unix shells.
 
 Discover the portfolio from the repository root:
 

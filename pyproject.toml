@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "aine-registry"
-version = "1.4.0"
+dynamic = ["version"]
 description = "Read-only multi-root portfolio intelligence for AI-assisted software engineering"
 readme = "README.md"
 requires-python = ">=3.9"
@@ -17,6 +17,9 @@ aine = "registry.aine_registry:main"
 
 [tool.setuptools.packages.find]
 include = ["registry*"]
+
+[tool.setuptools.dynamic]
+version = {attr = "registry.version.VERSION"}
 
 [tool.setuptools.package-data]
 registry = ["schema/*.json"]

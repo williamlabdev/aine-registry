@@ -24,6 +24,26 @@ def make_git_project(path: Path, remote: str, files: dict[str, str] | None = Non
 
 
 class MultiRootRegistryTests(unittest.TestCase):
+    def test_cli_reports_version(self):
+        result = subprocess.run([
+            sys.executable, str(Path(__file__).parent / "aine_registry.py"), "--version",
+        ], capture_output=True, text=True, check=True)
+        self.assertIn(registry.VERSION, result.stdout)
+
+    def test_validate_cli_returns_nonzero_for_invalid_snapshot(self):
+        with tempfile.TemporaryDirectory() as temp:
+            snapshot = Path(temp) / "invalid.json"
+            snapshot.write_text(json.dumps({"schema": "aine.registry.v1"}), encoding="utf-8")
+            result = subprocess.run([
+                sys.executable,
+                str(Path(__file__).parent / "aine_registry.py"),
+                "validate",
+                "--snapshot",
+                str(snapshot),
+            ], capture_output=True, text=True)
+            self.assertEqual(result.returncode, 1)
+            self.assertFalse(json.loads(result.stdout)["valid"])
+
     def test_multi_root_duplicate_checkout_and_cross_root_scope(self):
         with tempfile.TemporaryDirectory() as temp:
             base = Path(temp)
@@ -427,7 +447,7 @@ class MultiRootRegistryTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp:
             example = Path(temp) / "polyrepo"
             shutil.copytree(source, example)
-            subprocess.run(["sh", "setup.sh"], cwd=example, check=True, capture_output=True, text=True)
+            subprocess.run([sys.executable, str(example / "setup.py")], cwd=example, check=True, capture_output=True, text=True)
             result = subprocess.run([
                 sys.executable, str(Path(__file__).parent / "aine_registry.py"), "discover",
                 "--root", str(example / "core"), "--root", str(example / "side-projects"),

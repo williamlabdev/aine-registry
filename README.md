@@ -375,6 +375,18 @@ Run the test suite:
 python3 -m unittest discover -s registry -p 'test_*.py' -v
 ```
 
+Run all repository verification gates, including the public polyrepo fixture:
+
+```bash
+python3 tools/verify.py
+```
+
+The CLI also exposes its package version without requiring an editable install:
+
+```bash
+python3 registry/aine_registry.py --version
+```
+
 ## Project documents
 
 - [Vision](docs/VISION.md) — why the registry exists and what it will not do

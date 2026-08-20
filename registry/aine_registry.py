@@ -22,6 +22,11 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit, urlunsplit
 
+try:
+    from .version import VERSION
+except ImportError:  # direct execution: python3 registry/aine_registry.py
+    from version import VERSION
+
 
 SCHEMA = "aine.registry.v1"
 DEFAULT_IGNORES = {
@@ -1672,6 +1677,7 @@ def command(args: argparse.Namespace) -> int:
     elif action == "validate":
         errors = snapshot_validation_errors(snapshot)
         print_json({"valid": not errors, "snapshot_id": snapshot.get("snapshot_id"), "errors": errors, "findings": snapshot.get("findings", [])})
+        return 0 if not errors else 1
     elif action == "handoff":
         print_json({"portfolio_id": snapshot["portfolio"]["portfolio_id"], "snapshot_id": snapshot["snapshot_id"], "projects": [{"project_id": p["project_id"], "root_id": p["root_id"], "checkout_id": p["checkout_id"], "path": p["path"]} for p in snapshot["projects"]], "cross_root_dependencies": sum(e["scope"] == "cross_root" for e in snapshot["dependencies"])})
     else: return 2
@@ -1699,6 +1705,7 @@ def add_workspace_options(command_parser: argparse.ArgumentParser) -> None:
 
 def parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description="Read-only AINE multi-root portfolio registry")
+    p.add_argument("--version", action="version", version=f"%(prog)s {VERSION}")
     p.add_argument("--workspace", help="legacy single workspace root")
     p.add_argument("--root", dest="roots", action="append", help="workspace root; repeat for multi-root discovery")
     p.add_argument("--snapshot", help="read an existing JSON snapshot")
