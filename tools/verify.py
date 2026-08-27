@@ -45,7 +45,7 @@ def verify_cli_contract(env: dict[str, str]) -> None:
         text=True,
         env=env,
     )
-    expected_output = f"{REGISTRY_SCRIPT.name} {VERSION}"
+    expected_output = f"aine-registry {VERSION}"
     if result.stdout.strip() != expected_output:
         raise AssertionError(f"unexpected version output: {result.stdout!r}")
     subprocess.run([sys.executable, str(REGISTRY_SCRIPT), "--help"], cwd=ROOT, check=True, stdout=subprocess.DEVNULL, env=env)

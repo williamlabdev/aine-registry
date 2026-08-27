@@ -16,7 +16,7 @@ This roadmap describes product outcomes, not promises of automatic support for e
 
 ## v0.2 — Developer Workflow (released)
 
-- [x] Stable `aine` executable wrapper
+- [x] Stable `aine-registry` executable wrapper
 - [x] `scan`, `impact`, and `validate` command forms
 - [x] Installable package metadata with no runtime dependencies
 - [x] Human-readable impact reports
@@ -44,9 +44,9 @@ This roadmap describes product outcomes, not promises of automatic support for e
 
 ## v0.5 — Evidence and Handoff (released)
 
-- [x] `aine preflight --output` evidence bundle
+- [x] `aine-registry preflight --output` evidence bundle
 - [x] Stable `aine.evidence.v1` record
-- [x] `aine handoff --preflight` handoff record
+- [x] `aine-registry handoff --preflight` handoff record
 - [x] Stable `aine.handoff.v1` record
 - [x] Human-review status and next actions
 
@@ -91,7 +91,7 @@ This roadmap describes product outcomes, not promises of automatic support for e
 
 - [x] Generate read-only approval requests from preflight evidence
 - [x] Include approval requests in handoff records
-- [x] Provide `aine approval --handoff` export
+- [x] Provide `aine-registry approval --handoff` export
 - [x] Record external approval decisions without executing them
 
 ## v1.0 — Stable Governance Core (released)
@@ -107,7 +107,7 @@ This roadmap describes product outcomes, not promises of automatic support for e
 
 - [x] Content-addressed local evidence records
 - [x] Append-only file creation with integrity verification
-- [x] `aine evidence store`, `list`, and `get` commands
+- [x] `aine-registry evidence store`, `list`, and `get` commands
 - [x] Tamper detection without runtime dependencies
 
 ## v1.3 — Self-hosted Service and Compliance Export (released)

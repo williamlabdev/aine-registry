@@ -222,14 +222,14 @@ evidence-backed graph edge as a dependency, while retaining an optional
 without inventing runtime relationships from filenames or prose.
 
 The normalized snapshot exposes manifest-backed relationship edges in a
-dedicated `relationships` collection and through `aine relationships`. They
+dedicated `relationships` collection and through `aine-registry relationships`. They
 remain mirrored in `dependencies` so existing consumers do not need to migrate
 immediately.
 
 The CLI query can filter by project, `relationship_type`, and lifecycle status,
 so an agent can request only the relationship slice relevant to its task.
 
-`aine context --project PROJECT` packages the same scoped graph into one
+`aine-registry context --project PROJECT` packages the same scoped graph into one
 portable JSON response for agent handoff. It is derived from a snapshot and
 does not execute project code or persist session state.
 

@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """Read-only multi-root AINE Portfolio Intelligence Registry.
 
-This module remains the public compatibility facade.  Implementation
+This module remains the public compatibility facade. Implementation
 responsibilities live in focused modules while the historical import path and
-console-script entry point remain stable.
+direct-script entry point remain stable. The installed console command is
+``aine-registry``.
 """
 
 from __future__ import annotations

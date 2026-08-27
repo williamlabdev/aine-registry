@@ -45,7 +45,7 @@ def load_snapshot(args: argparse.Namespace) -> dict[str, Any]:
     except (OSError, json.JSONDecodeError) as exc: raise SystemExit(f"could not read snapshot: {exc}")
 
 def add_workspace_options(command_parser: argparse.ArgumentParser) -> None:
-    """Allow the ergonomic `aine command --root ...` form.
+    """Allow the ergonomic `aine-registry command --root ...` form.
 
     Global options remain supported for backwards compatibility. Suppressed
     defaults prevent subcommand options from overwriting global values.
@@ -57,7 +57,10 @@ def add_workspace_options(command_parser: argparse.ArgumentParser) -> None:
     command_parser.add_argument("--config", default=argparse.SUPPRESS, help=argparse.SUPPRESS)
 
 def parser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(description="Read-only AINE multi-root portfolio registry")
+    p = argparse.ArgumentParser(
+        prog="aine-registry",
+        description="Read-only AINE multi-root portfolio registry",
+    )
     p.add_argument("--version", action="version", version=f"%(prog)s {VERSION}")
     p.add_argument("--workspace", help="legacy single workspace root")
     p.add_argument("--root", dest="roots", action="append", help="workspace root; repeat for multi-root discovery")

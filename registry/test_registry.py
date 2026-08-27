@@ -42,7 +42,12 @@ class MultiRootRegistryTests(unittest.TestCase):
         result = subprocess.run([
             sys.executable, str(Path(__file__).parent / "aine_registry.py"), "--version",
         ], capture_output=True, text=True, check=True)
+        self.assertTrue(result.stdout.startswith("aine-registry "), result.stdout)
         self.assertIn(registry.VERSION, result.stdout)
+
+    def test_cli_uses_canonical_program_name(self):
+        help_text = registry.parser().format_help()
+        self.assertIn("usage: aine-registry", help_text)
 
     def test_validate_cli_returns_nonzero_for_invalid_snapshot(self):
         with tempfile.TemporaryDirectory() as temp:

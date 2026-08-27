@@ -34,11 +34,11 @@ On Windows PowerShell, use `.venv\Scripts\Activate.ps1` instead of `source .venv
 
 No package installation is required.
 
-To install the `aine` command in the optional virtual environment:
+To install the `aine-registry` command in the optional virtual environment:
 
 ```bash
 python3 -m pip install -e .
-aine --help
+aine-registry --help
 ```
 
 The editable install is only a CLI packaging step; the registry itself has no runtime third-party dependencies.
@@ -55,17 +55,19 @@ python3 registry/aine_registry.py --snapshot /tmp/aine-portfolio.json validate
 After installation, the equivalent shorthand is:
 
 ```bash
-aine scan --root /path/to/workspace
-aine impact --root /path/to/workspace --project workspace.app
-aine validate --root /path/to/workspace
-aine preflight --root /path/to/workspace --change app/api.yaml
-aine preflight --root /path/to/workspace --diff --format markdown
-aine preflight --root /path/to/workspace --staged
-aine preflight --root /path/to/workspace --base origin/main
+aine-registry scan --root /path/to/workspace
+aine-registry impact --root /path/to/workspace --project workspace.app
+aine-registry validate --root /path/to/workspace
+aine-registry preflight --root /path/to/workspace --change app/api.yaml
+aine-registry preflight --root /path/to/workspace --diff --format markdown
+aine-registry preflight --root /path/to/workspace --staged
+aine-registry preflight --root /path/to/workspace --base origin/main
 ```
 
-The installed `aine` command is the supported interface. The Python script
-entrypoint remains available for backwards compatibility.
+The installed `aine-registry` command is the supported interface. The Python
+script entrypoint remains available for backwards compatibility. The standalone
+`aine` command belongs to Orvena's deprecated compatibility alias and is not
+installed by this package.
 
 ## Project-local metadata
 
@@ -105,9 +107,9 @@ edge retains the manifest as evidence.
 Query explicit relationships directly with:
 
 ```bash
-aine relationships --root /path/to/workspace
-aine relationships --root /path/to/workspace --relationship-type event_consumer
-aine relationships --root /path/to/workspace --relationship-status planned
+aine-registry relationships --root /path/to/workspace
+aine-registry relationships --root /path/to/workspace --relationship-type event_consumer
+aine-registry relationships --root /path/to/workspace --relationship-status planned
 ```
 
 Snapshots expose the same records under `relationships`; the original
@@ -116,7 +118,7 @@ Snapshots expose the same records under `relationships`; the original
 Build a scoped agent context bundle with:
 
 ```bash
-aine context --root /path/to/workspace --project checkout-service
+aine-registry context --root /path/to/workspace --project checkout-service
 ```
 
 The result includes the selected project, its artifacts, touching dependencies
@@ -125,8 +127,8 @@ and relationships, related source-of-truth rules, findings, and snapshot ID.
 Validate a snapshot before handing it to an agent or CI step:
 
 ```bash
-aine validate --root /path/to/workspace
-aine validate --snapshot /tmp/aine-portfolio.json
+aine-registry validate --root /path/to/workspace
+aine-registry validate --snapshot /tmp/aine-portfolio.json
 ```
 
 Validation checks the registry schema identity, core collection shape, edge
@@ -141,15 +143,15 @@ Preflight is read-only and reports matched projects, affected projects,
 source-of-truth rules, suggested validation commands, and unresolved changes:
 
 ```bash
-aine preflight --root /path/to/workspace --change payment-service/openapi.yaml
+aine-registry preflight --root /path/to/workspace --change payment-service/openapi.yaml
 ```
 
 Git-aware preflight can read the working tree, index, or a base comparison:
 
 ```bash
-aine preflight --root /path/to/workspace --diff
-aine preflight --root /path/to/workspace --staged
-aine preflight --root /path/to/workspace --base origin/main --format markdown
+aine-registry preflight --root /path/to/workspace --diff
+aine-registry preflight --root /path/to/workspace --staged
+aine-registry preflight --root /path/to/workspace --base origin/main --format markdown
 ```
 
 Artifact metadata may declare `risk` (`low`, `medium`, `high`, or `critical`)
@@ -176,7 +178,7 @@ can be `pass`, `review_required`, or `fail`. The default `advisory` mode always
 returns exit code 0. Opt into machine-readable enforcement for a run with:
 
 ```bash
-aine preflight --root /path/to/workspace --diff --policy-mode enforced
+aine-registry preflight --root /path/to/workspace --diff --policy-mode enforced
 ```
 
 In `enforced` mode, a non-`pass` policy returns exit code 1 and sets
@@ -217,8 +219,8 @@ actions.
 Save a machine-readable evidence bundle and create a handoff record:
 
 ```bash
-aine preflight --root /path/to/workspace --diff --output preflight.json
-aine handoff --preflight preflight.json --format markdown
+aine-registry preflight --root /path/to/workspace --diff --output preflight.json
+aine-registry handoff --preflight preflight.json --format markdown
 ```
 
 Evidence and handoff records are deterministic, read-only artifacts for review
@@ -228,7 +230,7 @@ When review or approval is required, the handoff includes an
 `aine.approval.v1` request. It can also be emitted independently:
 
 ```bash
-aine approval --handoff handoff.json --output approval.json
+aine-registry approval --handoff handoff.json --output approval.json
 ```
 
 The request records `requested`, `blocked`, or `not_required` state and keeps
@@ -236,7 +238,7 @@ the evidence ID, reasons, and affected projects. An external decision can be
 recorded without executing it:
 
 ```bash
-aine approval --handoff handoff.json \
+aine-registry approval --handoff handoff.json \
   --decision approved --decided-by human.william \
   --output approval.json
 ```
@@ -247,9 +249,9 @@ identity, ticketing, merge, or deployment system.
 Evidence can be retained in a local, append-only, content-addressed store:
 
 ```bash
-aine evidence store --input preflight.json --store .aine/evidence
-aine evidence list --store .aine/evidence
-aine evidence get --id sha256:<digest> --store .aine/evidence
+aine-registry evidence store --input preflight.json --store .aine/evidence
+aine-registry evidence list --store .aine/evidence
+aine-registry evidence get --id sha256:<digest> --store .aine/evidence
 ```
 
 The store verifies each record's digest on read and reports tampered records as
@@ -259,7 +261,7 @@ explicit store directory supplied by the caller.
 Portable snapshots can be rendered as a static self-hostable portfolio view:
 
 ```bash
-aine view --snapshot registry.json --output portfolio.html
+aine-registry view --snapshot registry.json --output portfolio.html
 ```
 
 The HTML output is dependency-free and contains only portable project metadata;
@@ -268,7 +270,7 @@ serve it from any static host when a hosted view is desired.
 For a local self-hosted view with read-only JSON routes:
 
 ```bash
-aine serve --snapshot registry.json --store .aine/evidence --host 127.0.0.1 --port 8080
+aine-registry serve --snapshot registry.json --store .aine/evidence --host 127.0.0.1 --port 8080
 ```
 
 The server exposes `/`, `/api/snapshot`, and `/api/evidence`. It uses only the
@@ -277,8 +279,8 @@ Python standard library and binds to loopback by default.
 Audit bundles and retention manifests are portable exports:
 
 ```bash
-aine evidence export --store .aine/evidence --output audit-bundle.json
-aine evidence retention --store .aine/evidence --retain-days 365 \
+aine-registry evidence export --store .aine/evidence --output audit-bundle.json
+aine-registry evidence retention --store .aine/evidence --retain-days 365 \
   --as-of 2026-08-19T00:00:00+00:00 --output retention.json
 ```
 
@@ -350,7 +352,7 @@ Static module imports are exposed through the portable `imports` collection and
 the CLI:
 
 ```bash
-aine imports --root /path/to/workspace
+aine-registry imports --root /path/to/workspace
 ```
 
 The built-in adapter supports Python, JavaScript, TypeScript, Go, and Rust. It

@@ -13,7 +13,7 @@ authors = [{ name = "AINE contributors" }]
 dependencies = []
 
 [project.scripts]
-aine = "registry.aine_registry:main"
+aine-registry = "registry.aine_registry:main"
 
 [tool.setuptools.packages.find]
 include = ["registry*"]
