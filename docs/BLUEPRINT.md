@@ -1,6 +1,6 @@
 # AINE Registry Blueprint
 
-**Status:** APPROVED FOR PUBLIC CORE v1.5.0
+**Status:** APPROVED FOR PUBLIC CORE v1.6.0
 **Scope:** local-first registry and impact analysis  
 **Related:** [Vision](VISION.md), [Roadmap](ROADMAP.md)
 

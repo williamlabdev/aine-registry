@@ -499,6 +499,49 @@ class MultiRootRegistryTests(unittest.TestCase):
             invalid = subprocess.run([sys.executable, str(Path(__file__).parent / "aine_registry.py"), "evidence", "list", "--store", str(store)], capture_output=True, text=True, check=True)
             self.assertEqual(json.loads(invalid.stdout)[0]["status"], "invalid")
 
+    def test_integration_observation_joins_a_producer_run_to_a_stored_snapshot(self):
+        with tempfile.TemporaryDirectory() as temp:
+            base = Path(temp)
+            store = base / "evidence-store"
+            script = str(Path(__file__).parent / "aine_registry.py")
+            snapshot = {"schema": "aine.registry.v1", "projects": [], "dependencies": [], "read_only": True}
+            snapshot_path = base / "snapshot.json"
+            snapshot_path.write_text(json.dumps(snapshot), encoding="utf-8")
+            stored_snapshot = subprocess.run([sys.executable, script, "evidence", "store", "--input", str(snapshot_path), "--store", str(store)], capture_output=True, text=True, check=True)
+            snapshot_id = json.loads(stored_snapshot.stdout)["record_id"]
+            observation = {
+                "schema": "aine.control-plane.integration-observation.v1",
+                "evidence_id": "integration.producer.0123456789abcdef",
+                "correlation_id": "corr.example.001",
+                "producer": "producer",
+                "project_id": "example.producer",
+                "run_id": "producer-run-001",
+                "snapshot_id": snapshot_id,
+                "native_schema": "producer-evidence-v1",
+                "native_digest": "sha256:" + "b" * 64,
+                "status": "success",
+                "claims": {"completed": True},
+                "evidence_refs": ["producer://evidence/producer-run-001"],
+                "read_only": True,
+            }
+            observation_path = base / "observation.json"
+            observation_path.write_text(json.dumps(observation), encoding="utf-8")
+            stored = subprocess.run([sys.executable, script, "evidence", "store", "--input", str(observation_path), "--store", str(store)], capture_output=True, text=True, check=True)
+            self.assertEqual(json.loads(stored.stdout)["status"], "stored")
+            listed = json.loads(subprocess.run([sys.executable, script, "evidence", "list", "--store", str(store)], capture_output=True, text=True, check=True).stdout)
+            correlations = {entry.get("correlation_id") for entry in listed}
+            self.assertEqual(correlations, {None, "corr.example.001"})
+            fetched = json.loads(subprocess.run([sys.executable, script, "evidence", "get", "--id", json.loads(stored.stdout)["record_id"], "--store", str(store)], capture_output=True, text=True, check=True).stdout)
+            self.assertEqual(fetched["snapshot_id"], snapshot_id)
+            self.assertNotIn("native", fetched)
+            bundle = json.loads(subprocess.run([sys.executable, script, "evidence", "export", "--store", str(store)], capture_output=True, text=True, check=True).stdout)
+            self.assertEqual({record["schema"] for record in bundle["records"]}, {"aine.registry.v1", "aine.control-plane.integration-observation.v1"})
+            unsupported_path = base / "unsupported.json"
+            unsupported_path.write_text(json.dumps({"schema": "producer-evidence-v1", "run_id": "producer-run-001"}), encoding="utf-8")
+            rejected = subprocess.run([sys.executable, script, "evidence", "store", "--input", str(unsupported_path), "--store", str(store)], capture_output=True, text=True)
+            self.assertEqual(rejected.returncode, 2)
+            self.assertIn("unsupported record schema", rejected.stderr)
+
     def test_static_portfolio_view_uses_portable_snapshot(self):
         with tempfile.TemporaryDirectory() as temp:
             base = Path(temp)

@@ -277,6 +277,19 @@ The store verifies each record's digest on read and reports tampered records as
 invalid. It has no database or hosted-service dependency and only writes to the
 explicit store directory supplied by the caller.
 
+It accepts `aine.evidence.v1`, `aine.handoff.v1`, `aine.approval.v1`,
+`aine.registry.v1`, and `aine.control-plane.integration-observation.v1`. The
+last is the adapter boundary for separate enforcement or evaluation products:
+an observation carries that product's run identifier, a correlation identifier
+shared across the run, the `record_id` of an already-stored snapshot, and the
+digest of the native result — never the native payload, credentials, or
+machine-local paths. Storing one alongside its snapshot makes a producer run
+and the portfolio state it ran against reviewable as a single correlated set,
+without the Registry taking a dependency on that product. Records carrying a
+correlation identifier expose it in `evidence list`. Structural validity of a
+record is the producing tool's responsibility; the store owns identity,
+integrity, and append-only behavior.
+
 Portable snapshots can be rendered as a static self-hostable portfolio view:
 
 ```bash

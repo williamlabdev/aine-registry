@@ -8,6 +8,27 @@ All notable changes to AINE Registry are recorded here. The format follows
 > the MIT License. From 1.5.0 the project is distributed under Apache-2.0. See
 > [NOTICE](NOTICE) and the 1.5.0 entry below.
 
+## [1.6.0] - 2026-08-27
+
+### Added
+
+- The local evidence store accepts
+  `aine.control-plane.integration-observation.v1`. An observation is the
+  adapter boundary for a separate enforcement or evaluation product: it carries
+  that product's run identifier, a shared correlation identifier, the
+  `record_id` of an already-stored snapshot, and the digest of the native
+  result, so a producer run and the portfolio state it ran against become one
+  correlated set. The native payload, credentials, and machine-local paths stay
+  out of the record, and the core takes no dependency on the producing product.
+- `evidence list` reports a record's correlation identifier when it has one.
+- Regression fixtures for the snapshot join, the audit bundle, and the
+  unchanged rejection of unsupported record schemas.
+
+Demonstrated end to end against a real Orvena benchmark run: a portfolio
+snapshot stored as `aine.registry.v1`, an observation built from that run and
+referencing the stored snapshot digest, both exported in one
+`aine.audit.bundle.v1` with the join resolving and no native payload present.
+
 ## [1.5.0] - 2026-08-27
 
 ### Changed
