@@ -37,6 +37,17 @@ EVIDENCE_STORE_SCHEMAS = {
 }
 
 
+# Fields whose value is the record_id of another record in this store, listed
+# under the schema that defines them that way. A field belongs here only where
+# the contract says the value identifies a stored record. `aine.registry.v1`
+# also carries `snapshot_id`, but that one is the digest of the snapshot's own
+# canonical content rather than the identity of a stored envelope, so chasing
+# it would report every snapshot as a dangling reference to itself.
+STORE_REFERENCE_FIELDS = {
+    "aine.control-plane.integration-observation.v1": ("snapshot_id",),
+}
+
+
 def record_digest(record: dict[str, Any]) -> str:
     encoded = json.dumps(record, ensure_ascii=False, separators=(",", ":"), sort_keys=True).encode()
     return f"sha256:{hashlib.sha256(encoded).hexdigest()}"
@@ -70,7 +81,17 @@ def store_record(store_root: Path, record: dict[str, Any]) -> dict[str, Any]:
     return {"record_id": digest, "schema": schema, "status": "stored"}
 
 
-def list_store_records(store_root: Path) -> list[dict[str, Any]]:
+def store_references(record: dict[str, Any]) -> list[str]:
+    """Return the record_ids of other stored records this record points at."""
+    references = []
+    for field in STORE_REFERENCE_FIELDS.get(record.get("schema"), ()):
+        value = record.get(field)
+        if isinstance(value, str) and value:
+            references.append(value)
+    return references
+
+
+def list_store_records(store_root: Path, correlation_id: str | None = None) -> list[dict[str, Any]]:
     if not store_root.expanduser().is_dir():
         return []
     records: list[dict[str, Any]] = []
@@ -81,13 +102,48 @@ def list_store_records(store_root: Path) -> list[dict[str, Any]]:
             entry = {"record_id": envelope["record_id"], "schema": record.get("schema", "UNKNOWN"), "path": path.name}
             # A correlation identifier is what makes records from different
             # producers reviewable as one run, so it stays visible in the index.
-            correlation_id = record.get("correlation_id")
-            if isinstance(correlation_id, str) and correlation_id:
-                entry["correlation_id"] = correlation_id
+            correlation = record.get("correlation_id")
+            if isinstance(correlation, str) and correlation:
+                entry["correlation_id"] = correlation
+            if correlation_id is not None and entry.get("correlation_id") != correlation_id:
+                continue
             records.append(entry)
         except (OSError, ValueError, json.JSONDecodeError) as exc:
+            # A record that cannot be read has no readable correlation either.
+            # Dropping it from a scoped listing would hide a broken store from
+            # the review most likely to care that it is broken.
             records.append({"path": path.name, "status": "invalid", "error": str(exc)})
     return records
+
+
+def unresolved_references(store_root: Path, records: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Report referenced records the bundle does not carry, and why.
+
+    Scoping a bundle to one correlation cuts the snapshot an observation was
+    taken against out of the bundle, because a snapshot belongs to no single
+    correlation. Silently pulling it back in would make the declared scope a
+    lie, and silently omitting it would leave a join that cannot be followed,
+    so the bundle names what is absent instead. `out_of_scope` means the store
+    holds the record and this bundle excluded it; `missing` means the store
+    cannot produce it at all, including when it holds only an unreadable copy
+    already reported in `invalid_records`.
+    """
+
+    present = {record_digest(record) for record in records}
+    readable = {entry["record_id"] for entry in list_store_records(store_root) if entry.get("record_id")}
+    unresolved: dict[str, dict[str, Any]] = {}
+    for record in records:
+        for reference in store_references(record):
+            if reference in present:
+                continue
+            entry = unresolved.setdefault(
+                reference,
+                {"record_id": reference, "status": "out_of_scope" if reference in readable else "missing", "referenced_by": []},
+            )
+            entry["referenced_by"].append(record_digest(record))
+    for entry in unresolved.values():
+        entry["referenced_by"].sort()
+    return [unresolved[key] for key in sorted(unresolved)]
 
 
 def command_evidence(args: argparse.Namespace) -> int:
@@ -104,7 +160,7 @@ def command_evidence(args: argparse.Namespace) -> int:
         except (OSError, ValueError, json.JSONDecodeError) as exc:
             print(f"could not store evidence: {exc}", file=sys.stderr); return 2
     elif args.evidence_action == "list":
-        print_json(list_store_records(store_root))
+        print_json(list_store_records(store_root, args.correlation))
     elif args.evidence_action == "get":
         record_id = args.id if args.id.startswith("sha256:") else f"sha256:{args.id}"
         target = store_root / f"{record_id.removeprefix('sha256:')}.json"
@@ -114,7 +170,8 @@ def command_evidence(args: argparse.Namespace) -> int:
             print(f"could not read evidence: {exc}", file=sys.stderr); return 2
     elif args.evidence_action in {"export", "retention"}:
         try:
-            entries = list_store_records(store_root)
+            correlation_id = getattr(args, "correlation", None)
+            entries = list_store_records(store_root, correlation_id)
             valid_records = []
             for entry in entries:
                 if entry.get("status") == "invalid":
@@ -122,7 +179,10 @@ def command_evidence(args: argparse.Namespace) -> int:
                 envelope = load_store_record(store_root / entry["path"])
                 valid_records.append(envelope["record"])
             if args.evidence_action == "export":
-                payload = {"schema": "aine.audit.bundle.v1", "record_ids": [record_digest(record) for record in valid_records], "records": valid_records, "invalid_records": [entry for entry in entries if entry.get("status") == "invalid"], "read_only": True}
+                payload = {"schema": "aine.audit.bundle.v1", "record_ids": [record_digest(record) for record in valid_records], "records": valid_records, "invalid_records": [entry for entry in entries if entry.get("status") == "invalid"], "unresolved_refs": unresolved_references(store_root, valid_records), "read_only": True}
+                # An unscoped bundle must not claim a scope it does not have.
+                if correlation_id is not None:
+                    payload["correlation_id"] = correlation_id
             else:
                 as_of = datetime.fromisoformat(args.as_of.replace("Z", "+00:00"))
                 cutoff = as_of.timestamp() - (args.retain_days * 86400)

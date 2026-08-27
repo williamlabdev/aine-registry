@@ -290,6 +290,25 @@ correlation identifier expose it in `evidence list`. Structural validity of a
 record is the producing tool's responsibility; the store owns identity,
 integrity, and append-only behavior.
 
+Listings and audit bundles can be scoped to one correlation identifier, so a
+single run's records can be reviewed together without reading the whole store:
+
+```bash
+aine-registry evidence list --store .aine/evidence --correlation <id>
+aine-registry evidence export --store .aine/evidence --correlation <id> \
+  --output run-bundle.json
+```
+
+A scoped bundle declares its `correlation_id` and carries only the records in
+that scope. Because a snapshot belongs to no single correlation, the snapshot
+an observation was taken against falls outside the scope; rather than widen the
+scope or leave a join that cannot be followed, the bundle lists it under
+`unresolved_refs` as `out_of_scope`. A reference the store cannot produce at
+all is listed as `missing`. Every bundle reports `unresolved_refs`, so an
+unscoped export says plainly whether its joins resolve. A record that cannot be
+read stays visible in a scoped listing as `invalid`, because a broken store is
+relevant to every review.
+
 Portable snapshots can be rendered as a static self-hostable portfolio view:
 
 ```bash
@@ -307,6 +326,7 @@ aine-registry serve --snapshot registry.json --store .aine/evidence --host 127.0
 
 The server exposes `/`, `/api/snapshot`, and `/api/evidence`. It uses only the
 Python standard library and binds to loopback by default.
+`/api/evidence?correlation=<id>` answers the same scoped question the CLI does.
 
 Audit bundles and retention manifests are portable exports:
 

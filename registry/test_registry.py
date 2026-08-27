@@ -9,6 +9,7 @@ import tempfile
 import unittest
 from pathlib import Path
 import sys
+from urllib.request import urlopen
 
 sys.path.insert(0, str(Path(__file__).parent))
 import aine_registry as registry
@@ -541,6 +542,147 @@ class MultiRootRegistryTests(unittest.TestCase):
             rejected = subprocess.run([sys.executable, script, "evidence", "store", "--input", str(unsupported_path), "--store", str(store)], capture_output=True, text=True)
             self.assertEqual(rejected.returncode, 2)
             self.assertIn("unsupported record schema", rejected.stderr)
+
+    def test_correlation_scoped_listing_and_bundle_name_what_they_leave_out(self):
+        with tempfile.TemporaryDirectory() as temp:
+            base = Path(temp)
+            store = base / "evidence-store"
+            script = str(Path(__file__).parent / "aine_registry.py")
+
+            def run(*arguments):
+                return json.loads(subprocess.run([sys.executable, script, *arguments], capture_output=True, text=True, check=True).stdout)
+
+            def write(name, payload):
+                path = base / name
+                path.write_text(json.dumps(payload), encoding="utf-8")
+                return str(path)
+
+            # The snapshot carries a `snapshot_id` of its own, which is the
+            # digest of its canonical content and not a stored record_id.
+            snapshot = {"schema": "aine.registry.v1", "snapshot_id": "sha256:" + "c" * 64, "projects": [], "dependencies": [], "read_only": True}
+            snapshot_id = run("evidence", "store", "--input", write("snapshot.json", snapshot), "--store", str(store))["record_id"]
+
+            def observation(run_id, correlation_id, snapshot_reference):
+                return {
+                    "schema": "aine.control-plane.integration-observation.v1",
+                    "evidence_id": f"integration.{run_id}",
+                    "correlation_id": correlation_id,
+                    "producer": "producer",
+                    "project_id": "example.producer",
+                    "run_id": run_id,
+                    "snapshot_id": snapshot_reference,
+                    "native_schema": "producer-evidence-v1",
+                    "native_digest": "sha256:" + "b" * 64,
+                    "status": "success",
+                    "claims": {"completed": True},
+                    "read_only": True,
+                }
+
+            first = run("evidence", "store", "--input", write("first.json", observation("run-001", "corr.one", snapshot_id)), "--store", str(store))["record_id"]
+            second = run("evidence", "store", "--input", write("second.json", observation("run-002", "corr.one", snapshot_id)), "--store", str(store))["record_id"]
+            run("evidence", "store", "--input", write("other.json", observation("run-003", "corr.two", snapshot_id)), "--store", str(store))
+
+            scoped = run("evidence", "list", "--store", str(store), "--correlation", "corr.one")
+            self.assertEqual({entry["record_id"] for entry in scoped}, {first, second})
+            self.assertEqual(len(run("evidence", "list", "--store", str(store))), 4)
+            self.assertEqual(run("evidence", "list", "--store", str(store), "--correlation", "corr.absent"), [])
+
+            bundle = run("evidence", "export", "--store", str(store), "--correlation", "corr.one")
+            self.assertEqual(bundle["correlation_id"], "corr.one")
+            self.assertEqual({record["run_id"] for record in bundle["records"]}, {"run-001", "run-002"})
+            # The snapshot belongs to no single correlation, so a scoped bundle
+            # says it is absent instead of quietly widening its own scope.
+            self.assertEqual(
+                bundle["unresolved_refs"],
+                [{"record_id": snapshot_id, "referenced_by": sorted([first, second]), "status": "out_of_scope"}],
+            )
+
+            whole = run("evidence", "export", "--store", str(store))
+            self.assertNotIn("correlation_id", whole)
+            # The snapshot's own snapshot_id is not a store reference and must
+            # not be reported as a dangling one.
+            self.assertEqual(whole["unresolved_refs"], [])
+            self.assertEqual(len(whole["records"]), 4)
+
+    def test_a_bundle_reports_a_snapshot_reference_the_store_cannot_produce(self):
+        with tempfile.TemporaryDirectory() as temp:
+            base = Path(temp)
+            store = base / "evidence-store"
+            script = str(Path(__file__).parent / "aine_registry.py")
+            observation = {
+                "schema": "aine.control-plane.integration-observation.v1",
+                "evidence_id": "integration.orphan",
+                "correlation_id": "corr.orphan",
+                "producer": "producer",
+                "project_id": "example.producer",
+                "run_id": "run-orphan",
+                "snapshot_id": "sha256:" + "d" * 64,
+                "native_schema": "producer-evidence-v1",
+                "native_digest": "sha256:" + "b" * 64,
+                "status": "success",
+                "claims": {},
+                "read_only": True,
+            }
+            path = base / "orphan.json"
+            path.write_text(json.dumps(observation), encoding="utf-8")
+            stored = json.loads(subprocess.run([sys.executable, script, "evidence", "store", "--input", str(path), "--store", str(store)], capture_output=True, text=True, check=True).stdout)
+            bundle = json.loads(subprocess.run([sys.executable, script, "evidence", "export", "--store", str(store)], capture_output=True, text=True, check=True).stdout)
+            self.assertEqual(
+                bundle["unresolved_refs"],
+                [{"record_id": "sha256:" + "d" * 64, "referenced_by": [stored["record_id"]], "status": "missing"}],
+            )
+
+    def test_an_unreadable_record_stays_visible_in_a_correlation_scoped_listing(self):
+        with tempfile.TemporaryDirectory() as temp:
+            base = Path(temp)
+            store = base / "evidence-store"
+            script = str(Path(__file__).parent / "aine_registry.py")
+            record = {"schema": "aine.registry.v1", "correlation_id": "corr.one", "projects": [], "read_only": True}
+            path = base / "record.json"
+            path.write_text(json.dumps(record), encoding="utf-8")
+            stored = json.loads(subprocess.run([sys.executable, script, "evidence", "store", "--input", str(path), "--store", str(store)], capture_output=True, text=True, check=True).stdout)
+            stored_path = store / f"{stored['record_id'].removeprefix('sha256:')}.json"
+            tampered = json.loads(stored_path.read_text(encoding="utf-8"))
+            tampered["record"]["correlation_id"] = "corr.two"
+            stored_path.write_text(json.dumps(tampered), encoding="utf-8")
+            listed = json.loads(subprocess.run([sys.executable, script, "evidence", "list", "--store", str(store), "--correlation", "corr.one"], capture_output=True, text=True, check=True).stdout)
+            self.assertEqual([entry["status"] for entry in listed], ["invalid"])
+
+    def test_the_read_only_api_answers_the_same_correlation_question(self):
+        with tempfile.TemporaryDirectory() as temp:
+            base = Path(temp)
+            store = base / "evidence-store"
+            script = str(Path(__file__).parent / "aine_registry.py")
+            snapshot = {"schema": "aine.registry.v1", "snapshot_id": "sha256:" + "c" * 64, "portfolio": {"portfolio_id": "example", "name": "example"}, "projects": [], "repositories": [], "checkouts": [], "artifacts": [], "dependencies": [], "source_of_truth": [], "findings": [], "read_only": True}
+            snapshot_path = base / "snapshot.json"
+            snapshot_path.write_text(json.dumps(snapshot), encoding="utf-8")
+            record = {"schema": "aine.registry.v1", "correlation_id": "corr.one", "projects": [], "read_only": True}
+            record_path = base / "record.json"
+            record_path.write_text(json.dumps(record), encoding="utf-8")
+            stored = json.loads(subprocess.run([sys.executable, script, "evidence", "store", "--input", str(record_path), "--store", str(store)], capture_output=True, text=True, check=True).stdout)
+
+            def fetch(port, query=""):
+                with urlopen(f"http://127.0.0.1:{port}/api/evidence{query}", timeout=10) as response:
+                    return json.loads(response.read().decode("utf-8"))
+
+            # `-u` keeps the serving announcement out of a pipe buffer; it is
+            # printed as indented JSON, so read until the closing brace.
+            command = [sys.executable, "-u", script, "serve", "--snapshot", str(snapshot_path), "--store", str(store), "--host", "127.0.0.1", "--port", "0"]
+            with subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True) as server:
+                try:
+                    lines = []
+                    while not lines or lines[-1].strip() != "}":
+                        lines.append(server.stdout.readline())
+                        self.assertNotEqual(lines[-1], "", "server exited before announcing a port")
+                    announcement = json.loads("".join(lines))
+                    self.assertEqual(announcement["status"], "serving")
+                    port = announcement["port"]
+                    self.assertEqual([entry["record_id"] for entry in fetch(port, "?correlation=corr.one")], [stored["record_id"]])
+                    self.assertEqual(fetch(port, "?correlation=corr.absent"), [])
+                    self.assertEqual(len(fetch(port)), 1)
+                finally:
+                    server.terminate()
+                    server.wait(timeout=10)
 
     def test_static_portfolio_view_uses_portable_snapshot(self):
         with tempfile.TemporaryDirectory() as temp:
