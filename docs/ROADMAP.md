@@ -122,6 +122,16 @@ This roadmap describes product outcomes, not promises of automatic support for e
 - [ ] Managed hosted portfolio service
 - [ ] Provider-specific enterprise retention and compliance adapters
 
+## v1.4.3 — Portfolio baseline alignment (released)
+
+- [x] Declare portable validation commands in project manifests
+- [x] Keep portfolio/governance/integration topology edges separate from
+  change-impact traversal unless explicitly opted in
+- [x] Establish manifests for the AINE and Control Plane portfolio roots
+- [x] Preserve the read-only boundary while producing a seven-project snapshot
+- [ ] Add real Orvena and airt evidence adapters after a shared run/correlation
+  contract is demonstrated end to end
+
 ## Release principles
 
 1. Do not hide uncertainty to improve graph completeness metrics.

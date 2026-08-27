@@ -493,6 +493,29 @@ class MultiRootRegistryTests(unittest.TestCase):
             self.assertTrue(report["policy"]["enforced_failure"])
             self.assertEqual(report["policy"]["exit_code"], 1)
 
+    def test_manifest_declares_validation_commands(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp) / "workspace"
+            make_git_project(root / "service", "https://example.test/service.git", {"README.md": "service\n"})
+            (root / "service" / ".aine").mkdir()
+            (root / "service" / ".aine" / "registry.json").write_text(json.dumps({
+                "project": {
+                    "commands": {
+                        "test": {"command": "python3 -m pytest -q", "evidence": "pyproject.toml"},
+                        "verify": "make verify",
+                    }
+                }
+            }), encoding="utf-8")
+            snapshot = registry.discover([root], excluded_names=set())
+            project = next(item for item in snapshot["projects"] if item["project_id"] == "workspace.service")
+            self.assertEqual(project["commands"]["test"]["command"], "python3 -m pytest -q")
+            self.assertEqual(project["commands"]["test"]["evidence"], "pyproject.toml")
+            self.assertEqual(project["commands"]["verify"]["command"], "make verify")
+            report = registry.preflight(snapshot, ["service"], [root])
+            checks = {item["check"]: item["command"] for item in report["required_validation"]}
+            self.assertEqual(checks["test"], "python3 -m pytest -q")
+            self.assertEqual(checks["verify"], "make verify")
+
     def test_authorization_context_supports_rbac_and_abac_conditions(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp) / "workspace"
@@ -593,6 +616,19 @@ class MultiRootRegistryTests(unittest.TestCase):
             result = registry.impact(snapshot, provider["project_id"])
             self.assertTrue(result["cross_root"])
             self.assertTrue(result["direct_edges"])
+
+    def test_portfolio_relationships_do_not_expand_change_impact_by_default(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp) / "workspace"
+            make_git_project(root / "provider", "https://example.test/provider.git", {"README.md": "provider\n"})
+            make_git_project(root / "governed", "https://example.test/governed.git", {"README.md": "governed\n"})
+            (root / "governed" / ".aine").mkdir()
+            (root / "governed" / ".aine" / "registry.json").write_text(json.dumps({
+                "relationships": [{"target": "workspace.provider", "relationship_type": "portfolio_snapshot_consumer", "kind": "governance", "status": "planned"}],
+            }), encoding="utf-8")
+            snapshot = registry.discover([root], excluded_names=set())
+            provider = registry.impact(snapshot, "workspace.provider")
+            self.assertFalse(provider["direct_edges"])
 
 
 if __name__ == "__main__":

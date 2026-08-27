@@ -20,6 +20,15 @@
         },
         "kind": {"type": "string"},
         "capabilities": {"type": "array", "items": {"type": "string"}},
+        "commands": {
+          "type": "object",
+          "additionalProperties": {
+            "oneOf": [
+              {"type": "string"},
+              {"type": "object", "required": ["command"], "properties": {"command": {"type": "string"}, "evidence": {"type": "string"}}, "additionalProperties": true}
+            ]
+          }
+        },
         "risk": {"type": "object"},
         "approval_required": {"type": "boolean"},
         "policy": {

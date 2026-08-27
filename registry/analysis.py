@@ -79,6 +79,12 @@ def impact(snapshot: dict[str, Any], seed: str) -> dict[str, Any]:
     while frontier:
         next_frontier: set[str] = set()
         for edge in snapshot["dependencies"]:
+            # Portfolio/governance/integration relationships are useful for
+            # topology queries, but they do not imply that a source change
+            # requires validation of every related project.  A manifest may
+            # opt a relationship into impact propagation with `impact: true`.
+            if edge.get("kind") in {"portfolio", "governance", "integration"} and edge.get("impact") is not True:
+                continue
             source = edge["source"]["project_id"]; target = edge["target"]["project_id"]
             if target not in frontier: continue
             item = dict(edge); item["impact_depth"] = depth + 1; item["direct"] = depth == 0

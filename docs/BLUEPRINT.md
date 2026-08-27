@@ -1,6 +1,6 @@
 # AINE Registry Blueprint
 
-**Status:** APPROVED FOR PUBLIC CORE v0.3
+**Status:** APPROVED FOR PUBLIC CORE v1.4.3
 **Scope:** local-first registry and impact analysis  
 **Related:** [Vision](VISION.md), [Roadmap](ROADMAP.md)
 
@@ -30,7 +30,9 @@ The core reads local files and Git metadata. It does not edit discovered project
 
 Project-local `.aine/registry.json` metadata is explicit input, not executable
 configuration. The core uses it to declare artifacts, dependencies, and
-source-of-truth relationships that static discovery cannot reliably infer.
+source-of-truth relationships that static discovery cannot reliably infer. It
+may also declare portable validation commands; those commands are evidence for
+preflight only and are never executed by the Registry.
 
 ## Core objects
 
@@ -96,6 +98,12 @@ Git-aware modes derive changes from each discovered checkout:
 Risk is advisory in the public core. High or critical artifact risk, or an
 explicit `approval_required`, creates a human-review signal; it does not block
 the filesystem, Git, CI, or deployment.
+
+Topology relationships are not automatically change-impact dependencies. Edges
+with `kind` `portfolio`, `governance`, or `integration` are queryable in the
+relationship graph but are skipped during impact traversal unless their
+manifest explicitly sets `impact: true`. This prevents a portfolio ownership
+map from making every project appear affected by every change.
 
 ## Evidence and handoff
 

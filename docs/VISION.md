@@ -34,6 +34,22 @@ It is designed to be:
 - **Explicit about uncertainty** — `UNKNOWN` is a useful result, not a failure to hide.
 - **Composable** — portable policy context is part of the core, while identity providers, team directories, and organization-specific governance live in adapters.
 
+## Portfolio boundary (2026-08-23)
+
+The standalone `aine-registry` repository is the single Registry
+implementation and the producer of portable portfolio snapshots. Project-local
+`.aine/registry.json` files declare ownership, validation commands,
+relationships, and sources of truth; they do not authorize execution. The
+Registry remains read-only and does not become an approval service, agent
+runner, or deployment controller. `aine-control-plane-core` and the private
+Control Plane consume snapshots as report-only governance surfaces, while
+Orvena and airt remain separate enforcement products connected only through
+future evidence adapters with a shared run/correlation identifier.
+
+Portfolio, governance, and integration edges describe topology and do not
+expand change impact unless a manifest explicitly marks the edge
+`impact: true`.
+
 ## Non-goals
 
 AINE Registry is not currently:

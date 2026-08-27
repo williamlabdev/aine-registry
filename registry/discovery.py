@@ -248,6 +248,7 @@ def explicit_manifest_records(project: dict[str, Any], project_root: Path, works
     data, manifest_path = project_manifest(project_root)
     if not data or manifest_path is None:
         return [], [], []
+    evidence = f"{rel(workspace_root, project_root)}/{PROJECT_MANIFEST.as_posix()}"
     project_metadata = data.get("project", {})
     if isinstance(project_metadata, dict):
         project["owner"] = project_metadata.get("owner", project.get("owner", "UNKNOWN"))
@@ -262,7 +263,19 @@ def explicit_manifest_records(project: dict[str, Any], project_root: Path, works
         project["risk"] = {**project.get("risk", {}), **project_metadata.get("risk", {})} if isinstance(project_metadata.get("risk", {}), dict) else project.get("risk", {})
         project["approval_required"] = bool(project_metadata.get("approval_required", project.get("approval_required", False)))
         project["policy"] = project_metadata.get("policy", project.get("policy", {})) if isinstance(project_metadata.get("policy", project.get("policy", {})), dict) else project.get("policy", {})
-    evidence = f"{rel(workspace_root, project_root)}/{PROJECT_MANIFEST.as_posix()}"
+        declared_commands = project_metadata.get("commands", {})
+        if isinstance(declared_commands, dict):
+            commands = dict(project.get("commands", {}))
+            for name, command in declared_commands.items():
+                if isinstance(command, str):
+                    commands[str(name)] = {"command": command, "evidence": evidence}
+                elif isinstance(command, dict) and command.get("command"):
+                    commands[str(name)] = {
+                        **command,
+                        "command": str(command["command"]),
+                        "evidence": str(command.get("evidence", str(PROJECT_MANIFEST))),
+                    }
+            project["commands"] = commands
     artifacts: list[dict[str, Any]] = []
     for item in data.get("artifacts", []):
         if not isinstance(item, dict) or not item.get("path"):
@@ -303,6 +316,8 @@ def explicit_manifest_records(project: dict[str, Any], project_root: Path, works
         if is_relationship or item.get("relationship_type"):
             edge["relationship_type"] = str(item.get("relationship_type", item.get("kind", "declared")))
             edge["relationship_source"] = "manifest"
+            if "impact" in item:
+                edge["impact"] = bool(item["impact"])
         dependencies.append(edge)
     source_rules: list[dict[str, Any]] = []
     for item in data.get("source_of_truth", []):

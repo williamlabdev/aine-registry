@@ -99,6 +99,12 @@ cannot be safely inferred from code or configuration:
 The v0.3 manifest is JSON to keep the core dependency-free. YAML adapters are
 planned for a future release.
 
+The optional `project.commands` object declares portable validation commands
+(`test`, `verify`, `lint`, and `build`) for preflight. Commands are recorded as
+evidence and surfaced in the report; the Registry never executes them. A string
+value is accepted for compact manifests, or an object may include an explicit
+`command` and `evidence` path.
+
 For typed service or event relationships that static discovery cannot infer,
 the manifest also accepts a `relationships` array. Each entry names a target
 and may declare `relationship_type`, `status`, and `strength`; the resulting
