@@ -127,7 +127,9 @@ This roadmap describes product outcomes, not promises of automatic support for e
 - [x] Establish manifests for the AINE and Control Plane portfolio roots
 - [x] Preserve the read-only boundary while producing a seven-project snapshot
 - [ ] Add real Orvena and airt evidence adapters after a shared run/correlation
-  contract is demonstrated end to end
+  contract is demonstrated end to end. The Registry side landed in v1.6 and was
+  demonstrated with a real Orvena run; airt has not been demonstrated, and the
+  producer-side adapters live outside this repository
 
 ## v1.5 — Import fidelity (released)
 
@@ -139,6 +141,16 @@ This roadmap describes product outcomes, not promises of automatic support for e
 - [x] Add `stdlib` to the portable import resolution contract
 - [x] Regression fixtures for sibling fallback imports and standard-library
   imports in every supported language
+
+## v1.6 — Correlated producer evidence (released)
+
+- [x] Accept `aine.control-plane.integration-observation.v1` in the local
+  evidence store, so a separate product's run joins a stored snapshot
+- [x] Expose correlation identifiers in the evidence index
+- [x] Keep native payloads, credentials, and machine-local paths out of the
+  stored record, and keep the producing product out of the core's dependencies
+- [x] Regression fixtures for the snapshot join, the audit bundle, and the
+  unchanged rejection of unsupported record schemas
 
 ## Later — Control Plane
 

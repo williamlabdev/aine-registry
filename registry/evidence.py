@@ -21,7 +21,20 @@ def evidence_record(report: dict[str, Any]) -> dict[str, Any]:
     return record
 
 
-EVIDENCE_STORE_SCHEMAS = {"aine.evidence.v1", "aine.handoff.v1", "aine.approval.v1", "aine.registry.v1"}
+# Record kinds this store holds. Structural validity is the producing tool's
+# responsibility; the store owns identity, integrity, and append-only behavior.
+# `aine.control-plane.integration-observation.v1` is the adapter boundary for
+# enforcement products: it carries a producer run identifier, a shared
+# correlation identifier, and the digest of the native payload, never the
+# payload itself, so evidence from a separate product joins a snapshot without
+# the core taking a dependency on that product.
+EVIDENCE_STORE_SCHEMAS = {
+    "aine.evidence.v1",
+    "aine.handoff.v1",
+    "aine.approval.v1",
+    "aine.registry.v1",
+    "aine.control-plane.integration-observation.v1",
+}
 
 
 def record_digest(record: dict[str, Any]) -> str:
@@ -65,7 +78,13 @@ def list_store_records(store_root: Path) -> list[dict[str, Any]]:
         try:
             envelope = load_store_record(path)
             record = envelope["record"]
-            records.append({"record_id": envelope["record_id"], "schema": record.get("schema", "UNKNOWN"), "path": path.name})
+            entry = {"record_id": envelope["record_id"], "schema": record.get("schema", "UNKNOWN"), "path": path.name}
+            # A correlation identifier is what makes records from different
+            # producers reviewable as one run, so it stays visible in the index.
+            correlation_id = record.get("correlation_id")
+            if isinstance(correlation_id, str) and correlation_id:
+                entry["correlation_id"] = correlation_id
+            records.append(entry)
         except (OSError, ValueError, json.JSONDecodeError) as exc:
             records.append({"path": path.name, "status": "invalid", "error": str(exc)})
     return records
