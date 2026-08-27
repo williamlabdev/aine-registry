@@ -117,13 +117,10 @@ This roadmap describes product outcomes, not promises of automatic support for e
 - [x] Portable audit bundle export
 - [x] Portable retention manifest with review-only semantics
 
-## Later — Control Plane
-
-- [ ] Managed hosted portfolio service
-- [ ] Provider-specific enterprise retention and compliance adapters
-
 ## v1.4.3 — Portfolio baseline alignment (released)
 
+- [x] Rename the installed console script to `aine-registry`, matching the
+  package and distribution name
 - [x] Declare portable validation commands in project manifests
 - [x] Keep portfolio/governance/integration topology edges separate from
   change-impact traversal unless explicitly opted in
@@ -131,6 +128,11 @@ This roadmap describes product outcomes, not promises of automatic support for e
 - [x] Preserve the read-only boundary while producing a seven-project snapshot
 - [ ] Add real Orvena and airt evidence adapters after a shared run/correlation
   contract is demonstrated end to end
+
+## Later — Control Plane
+
+- [ ] Managed hosted portfolio service
+- [ ] Provider-specific enterprise retention and compliance adapters
 
 ## Release principles
 
