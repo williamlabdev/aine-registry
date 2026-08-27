@@ -34,6 +34,19 @@ On Windows PowerShell, use `.venv\Scripts\Activate.ps1` instead of `source .venv
 
 No package installation is required.
 
+## Security checks
+
+Install the external scanners and run the repository gate before review:
+
+```bash
+brew install gitleaks osv-scanner
+./tools/security_scan.sh
+```
+
+The gate scans Git history and the working tree for secrets and recursively
+checks dependency manifests with OSV-Scanner. The public core has no Node
+package manifest, so `npm audit` is not applicable here.
+
 To install the `aine-registry` command in the optional virtual environment:
 
 ```bash

@@ -1,0 +1,35 @@
+{
+  "project": {
+    "id": "tools.aine-registry",
+    "owner": "william",
+    "ownership": {"team": "aine-governance", "owners": ["william"], "delegates": []},
+    "kind": "portfolio_registry",
+    "capabilities": ["project_discovery", "portable_snapshot", "preflight", "context_bundle", "evidence_store", "static_view"],
+    "risk": {"default": "high", "high_risk_paths": ["registry/schema/", "registry/discovery.py", "registry/analysis.py", "docs/BLUEPRINT.md"]},
+    "approval_required": true,
+    "policy": {"mode": "advisory", "require_approval_for": ["high", "schema", "policy"], "deny_unknown_changes": false, "required_checks": ["test", "verify"]},
+    "commands": {
+      "test": {"command": "python3 -m unittest discover -s registry -p 'test_*.py' -q", "evidence": "registry/test_registry.py"},
+      "verify": {"command": "python3 tools/verify.py", "evidence": "tools/verify.py"}
+    }
+  },
+  "artifacts": [
+    {"id": "registry-project-manifest", "path": ".aine/registry.json", "kind": "project_manifest", "role": "config", "status": "present", "risk": "high", "approval_required": true},
+    {"id": "registry-vision", "path": "docs/VISION.md", "kind": "vision", "role": "source", "source_of_truth": "registry.vision", "status": "present", "risk": "high", "approval_required": true},
+    {"id": "registry-blueprint", "path": "docs/BLUEPRINT.md", "kind": "blueprint", "role": "source", "source_of_truth": "registry.blueprint", "status": "present", "risk": "high", "approval_required": true},
+    {"id": "registry-roadmap", "path": "docs/ROADMAP.md", "kind": "roadmap", "role": "source", "source_of_truth": "registry.roadmap", "status": "present", "risk": "high", "approval_required": true},
+    {"id": "registry-snapshot-schema", "path": "registry/schema/registry.v1.schema.json", "kind": "snapshot_schema", "role": "schema", "source_of_truth": "registry.snapshot_schema", "status": "present", "risk": "critical", "approval_required": true},
+    {"id": "registry-manifest-schema", "path": "registry/schema/project-manifest.v1.schema.json", "kind": "project_manifest_schema", "role": "schema", "source_of_truth": "registry.manifest_schema", "status": "present", "risk": "critical", "approval_required": true}
+  ],
+  "relationships": [
+    {"target": "tools.aine-control-plane", "relationship_type": "snapshot_provider", "kind": "governance", "strength": "required", "status": "planned"},
+    {"target": "tools.aine-control-plane-core", "relationship_type": "contract_consumer", "kind": "governance", "strength": "planned", "status": "planned"}
+  ],
+  "source_of_truth": [
+    {"domain": "registry.vision", "authority": {"project_id": "tools.aine-registry", "artifact": "registry-vision"}, "status": "declared"},
+    {"domain": "registry.blueprint", "authority": {"project_id": "tools.aine-registry", "artifact": "registry-blueprint"}, "status": "declared"},
+    {"domain": "registry.roadmap", "authority": {"project_id": "tools.aine-registry", "artifact": "registry-roadmap"}, "status": "declared"},
+    {"domain": "registry.snapshot_schema", "authority": {"project_id": "tools.aine-registry", "artifact": "registry-snapshot-schema"}, "status": "declared"},
+    {"domain": "registry.manifest_schema", "authority": {"project_id": "tools.aine-registry", "artifact": "registry-manifest-schema"}, "status": "declared"}
+  ]
+}

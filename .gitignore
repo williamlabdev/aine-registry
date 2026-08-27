@@ -5,4 +5,11 @@ __pycache__/
 .mypy_cache/
 .DS_Store
 .aine/
+!/.aine/
+!/.aine/registry.json
 *.jsonl
+build/
+*.egg-info/
+
+# Local portfolio governance descriptor; not published with the public core.
+/manifest.yaml
