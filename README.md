@@ -375,11 +375,20 @@ aine-registry imports --root /path/to/workspace
 ```
 
 The built-in adapter supports Python, JavaScript, TypeScript, Go, and Rust. It
-records source path, language, specifier, static/dynamic kind, local or
-external resolution, target path when resolvable, and evidence. Local imports
-remain file-level records; external and workspace-package imports also become
-project dependency edges. Unresolvable imports remain explicit rather than
-being treated as absent.
+records source path, language, specifier, static/dynamic kind, resolution,
+target path when resolvable, and evidence.
+
+Resolution is one of `local`, `stdlib`, `workspace_package`, `external`, or
+`unresolved`. Local and standard-library imports remain file-level records;
+external and workspace-package imports also become project dependency edges.
+Unresolvable imports remain explicit rather than being treated as absent.
+
+A standard-library import is a resolved dependency on the language runtime, not
+an unknown provider, so it carries a `stdlib:<language>:<module>` target and
+produces no project dependency edge. A Python module that is imported both
+relatively and by its bare name — the `from .module import x` /
+`from module import x` fallback pair used by scripts — resolves to the same
+sibling file in both spellings, so one dependency is not counted twice.
 
 For example, impact analysis against live workspace roots currently uses:
 

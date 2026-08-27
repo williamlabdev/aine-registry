@@ -429,7 +429,12 @@ def resolve_import_path(source: Path, specifier: str, root: Path, language: str,
             candidates = import_candidates(base, module, (".py",))
         else:
             module = specifier.replace(".", "/")
-            candidates = import_candidates(root, module, (".py",)) + import_candidates(root / "src", module, (".py",))
+            # A non-relative Python import also resolves against the directory of
+            # the importing file when that file is run as a script, which is how
+            # the `from .module import x` / `from module import x` fallback pair
+            # is normally written. Sibling candidates come last so a project-root
+            # or `src/` module still wins.
+            candidates = import_candidates(root, module, (".py",)) + import_candidates(root / "src", module, (".py",)) + import_candidates(source.parent, module, (".py",))
     elif language in {"javascript", "typescript"}:
         if not specifier.startswith("."):
             return None
@@ -451,6 +456,33 @@ def resolve_import_path(source: Path, specifier: str, root: Path, language: str,
     else:
         return None
     return next((candidate.resolve() for candidate in candidates if candidate.is_file()), None)
+
+
+def stdlib_package(specifier: str, language: str, go_module: str | None = None) -> str | None:
+    """Return the standard-library provider for a specifier, or None.
+
+    A standard-library import is resolved: the provider is the language runtime.
+    Reporting it as an unknown external project would be a false unknown, so the
+    import record keeps the specifier and no dependency edge is produced.
+    """
+    if language == "python":
+        package = specifier.split(".")[0]
+        return package if package in PYTHON_STDLIB_MODULES else None
+    if language in {"javascript", "typescript"}:
+        package = specifier.removeprefix("node:").split("/")[0]
+        return package if package in NODE_BUILTIN_MODULES else None
+    if language == "go":
+        # A Go import path outside the standard library must start with a
+        # domain-like element, so a first element without a dot is standard,
+        # unless it belongs to a local module declared without a domain.
+        head = specifier.split("/")[0]
+        if go_module and (specifier == go_module or specifier.startswith(f"{go_module}/")):
+            return None
+        return specifier if head and "." not in head else None
+    if language == "rust":
+        crate = specifier.split("::")[0]
+        return crate if crate in RUST_STDLIB_CRATES else None
+    return None
 
 
 def package_name(specifier: str) -> str:
@@ -502,6 +534,7 @@ def module_import_records(root: Path, workspace_root: Path, project: dict[str, A
                     values = [value for value in match.groups() if value]
                     if language == "python":
                         values = [re.split(r"\s+as\s+", part.strip(), maxsplit=1)[0].strip() for value in values for part in value.split(",") if part.strip()]
+                        values = [value for value in values if PYTHON_MODULE_RE.match(value)]
                     if language == "go" and values and "\n" in values[0]:
                         values = re.findall(r"[\"']([^\"']+)[\"']", values[0])
                     imports.extend((value, import_kind) for value in values)
@@ -520,8 +553,15 @@ def module_import_records(root: Path, workspace_root: Path, project: dict[str, A
                     resolution = "unresolved"
                 elif not local_target and not specifier.startswith("."):
                     package = package_name(specifier)
-                    target_id = package_index.get(package, f"external:{package}")
-                    resolution = "workspace_package" if package in package_index else "external"
+                    standard = stdlib_package(specifier, language, go_module)
+                    if standard:
+                        # Standard-library modules take precedence over an
+                        # installed package of the same name at import time.
+                        target_id = f"stdlib:{language}:{standard}"
+                        resolution = "stdlib"
+                    else:
+                        target_id = package_index.get(package, f"external:{package}")
+                        resolution = "workspace_package" if package in package_index else "external"
                 if not target_id:
                     target_id = "external:UNKNOWN"
                 evidence = rel(workspace_root, path)
@@ -538,7 +578,7 @@ def module_import_records(root: Path, workspace_root: Path, project: dict[str, A
                     "evidence": [evidence],
                 }
                 records.append(record)
-                if resolution != "local" and target_id != project["project_id"]:
+                if resolution not in {"local", "stdlib"} and target_id != project["project_id"]:
                     target = next((item for item in projects if item["project_id"] == target_id), None)
                     edge = make_edge(project["project_id"], target_id, "module_import", "required", "active", evidence, {"specifier": specifier, "language": language, "resolution": resolution}, projects, target)
                     edge["confidence"] = "medium" if resolution in {"external", "unresolved"} else "high"
