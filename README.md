@@ -436,4 +436,7 @@ Experimental public core. Relationship inference is evidence-based and incomplet
 
 ## License
 
-MIT. See [LICENSE](LICENSE).
+Apache-2.0. See [LICENSE](LICENSE) and [NOTICE](NOTICE).
+
+Relicensed from MIT on 2026-08-27 by the sole copyright holder; copies
+distributed before that date remain available under their original MIT terms.
