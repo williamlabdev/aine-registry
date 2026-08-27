@@ -8,6 +8,34 @@ All notable changes to AINE Registry are recorded here. The format follows
 > the MIT License. From 1.5.0 the project is distributed under Apache-2.0. See
 > [NOTICE](NOTICE) and the 1.5.0 entry below.
 
+## [1.7.0] - 2026-08-27
+
+### Added
+
+- `evidence list --correlation` and `evidence export --correlation` scope a
+  listing or an audit bundle to one correlation identifier, so a single
+  producer run can be reviewed without reading the whole store. A scoped bundle
+  declares its `correlation_id`; an unscoped one claims no scope.
+- Every audit bundle now reports `unresolved_refs`: references the bundle does
+  not carry, marked `out_of_scope` when the store holds the record and the
+  bundle excluded it, and `missing` when the store cannot produce it at all.
+  A snapshot belongs to no single correlation, so scoping a bundle to one run
+  necessarily leaves its snapshot out; the bundle names what is absent instead
+  of widening its own scope or leaving a join that cannot be followed.
+- `/api/evidence?correlation=<id>` answers the same scoped question as the CLI.
+- Regression fixtures for scoped listings and bundles, an unresolvable
+  reference, an unreadable record staying visible in a scoped listing, and the
+  read-only API route.
+
+Correlation identifiers became visible in 1.6.0 but could not be queried; a
+reviewer had to list the whole store and filter by hand.
+
+Only a field the contract defines as a stored record's identity is followed.
+`aine.registry.v1` also carries a `snapshot_id`, but that value is the digest
+of the snapshot's own canonical content rather than the identity of a stored
+envelope, so it is deliberately not chased and no snapshot is reported as a
+dangling reference to itself.
+
 ## [1.6.0] - 2026-08-27
 
 ### Added

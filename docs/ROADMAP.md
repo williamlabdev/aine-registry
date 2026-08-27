@@ -154,6 +154,17 @@ This roadmap describes product outcomes, not promises of automatic support for e
 - [x] Regression fixtures for the snapshot join, the audit bundle, and the
   unchanged rejection of unsupported record schemas
 
+## v1.7 — Correlation queries (released)
+
+- [x] Scope `evidence list` and `evidence export` to one correlation identifier
+- [x] Declare the scope on a scoped bundle and claim none on an unscoped one
+- [x] Report references a bundle does not carry, distinguishing a record the
+  bundle excluded from one the store cannot produce
+- [x] Keep an unreadable record visible in a scoped listing
+- [x] Answer the same scoped question on the read-only API
+- [x] Regression fixtures for scoped listings, unresolved references, and the
+  API route
+
 ## Later — Control Plane
 
 - [ ] Managed hosted portfolio service

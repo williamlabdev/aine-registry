@@ -7,6 +7,7 @@ import html
 import json
 from pathlib import Path
 from typing import Any
+from urllib.parse import parse_qs, urlsplit
 
 try:
     from .analysis import snapshot_validation_errors
@@ -70,18 +71,23 @@ def command_serve(args: argparse.Namespace) -> int:
         if not no_absolute_paths(snapshot):
             raise ValueError("snapshot contains an absolute local path")
         store_root = Path(args.store).expanduser().resolve() if args.store else None
-        records = lambda: list_store_records(store_root) if store_root else []
+        records = lambda correlation=None: list_store_records(store_root, correlation) if store_root else []
         document = portfolio_html(snapshot).encode("utf-8")
         snapshot_json = json.dumps(snapshot, ensure_ascii=False, indent=2, sort_keys=True).encode("utf-8")
 
         class Handler(BaseHTTPRequestHandler):
             def do_GET(self) -> None:
-                if self.path == "/":
+                route = urlsplit(self.path)
+                if route.path == "/":
                     content_type, payload = "text/html; charset=utf-8", document
-                elif self.path == "/api/snapshot":
+                elif route.path == "/api/snapshot":
                     content_type, payload = "application/json; charset=utf-8", snapshot_json
-                elif self.path == "/api/evidence":
-                    content_type, payload = "application/json; charset=utf-8", json.dumps(records(), ensure_ascii=False, indent=2, sort_keys=True).encode("utf-8")
+                elif route.path == "/api/evidence":
+                    # The read-only API answers the same correlation question
+                    # the CLI does, so a reviewer is not forced to choose a
+                    # surface to get a run's records together.
+                    correlation = parse_qs(route.query).get("correlation", [None])[0]
+                    content_type, payload = "application/json; charset=utf-8", json.dumps(records(correlation), ensure_ascii=False, indent=2, sort_keys=True).encode("utf-8")
                 else:
                     self.send_error(404, "not found")
                     return
