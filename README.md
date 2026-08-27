@@ -423,6 +423,7 @@ python3 registry/aine_registry.py --version
 - [Roadmap](docs/ROADMAP.md) — released capabilities and planned milestones
 - [Public polyrepo example](examples/polyrepo/README.md) — runnable multi-root fixture with cross-project relationships
 - [Blueprint](docs/BLUEPRINT.md) — public-core boundaries, data model, and runtime flow
+- [Changelog](CHANGELOG.md) — what changed in each release, including the license change at 1.5.0
 
 ## Public-core boundary
 
