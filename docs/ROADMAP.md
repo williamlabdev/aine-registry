@@ -129,6 +129,17 @@ This roadmap describes product outcomes, not promises of automatic support for e
 - [ ] Add real Orvena and airt evidence adapters after a shared run/correlation
   contract is demonstrated end to end
 
+## v1.5 — Import fidelity (released)
+
+- [x] Resolve Python script-mode fallback imports to the sibling module they
+  actually load, so a project stops depending on itself as an external package
+- [x] Recognize Python, Node, Go, and Rust standard-library providers as
+  resolved imports with no project dependency edge
+- [x] Reject prose that begins with `import` instead of recording it as a module
+- [x] Add `stdlib` to the portable import resolution contract
+- [x] Regression fixtures for sibling fallback imports and standard-library
+  imports in every supported language
+
 ## Later — Control Plane
 
 - [ ] Managed hosted portfolio service

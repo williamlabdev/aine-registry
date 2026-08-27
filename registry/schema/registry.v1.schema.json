@@ -72,7 +72,7 @@
         "language": {"type": "string"},
         "specifier": {"type": "string"},
         "kind": {"enum": ["module_import", "dynamic_import"]},
-        "resolution": {"enum": ["local", "workspace_package", "external", "unresolved"]},
+        "resolution": {"enum": ["local", "stdlib", "workspace_package", "external", "unresolved"]},
         "target_project_id": {"type": "string"},
         "target_path": {"type": ["string", "null"]},
         "evidence": {"type": "array", "items": {"type": "string"}}

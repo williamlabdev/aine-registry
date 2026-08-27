@@ -175,6 +175,61 @@ class MultiRootRegistryTests(unittest.TestCase):
             self.assertTrue(any(item["specifier"] == "serde::Deserialize" and item["resolution"] == "external" for item in imports))
             self.assertEqual(registry.snapshot_validation_errors(snapshot), [])
 
+    def test_python_script_mode_fallback_imports_resolve_to_siblings(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp) / "workspace"
+            make_git_project(root / "app", "https://example.test/app.git", {
+                "pkg/cli.py": "try:\n    from .engine import run\nexcept ImportError:\n    from engine import run\n",
+                "pkg/engine.py": "def run(): pass\n",
+            })
+            snapshot = registry.discover([root], excluded_names=set())
+            resolutions = {(item["specifier"], item["resolution"]) for item in snapshot["imports"]}
+            self.assertIn((".engine", "local"), resolutions)
+            self.assertIn(("engine", "local"), resolutions)
+            self.assertEqual([], [edge for edge in snapshot["dependencies"] if edge["target"]["project_id"] == "external:engine"])
+            self.assertEqual(registry.snapshot_validation_errors(snapshot), [])
+
+    def test_standard_library_imports_resolve_without_dependency_edges(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp) / "workspace"
+            make_git_project(root / "app", "https://example.test/app.git", {
+                "py/app.py": "import json\nfrom pathlib import Path\nimport requests\n",
+                "web/index.ts": "import fs from 'node:fs';\nimport path from 'path';\nimport lodash from 'lodash';\n",
+                "go.mod": "module example.com/acme\n\ngo 1.22\n",
+                "cmd/main.go": "package main\nimport (\n  \"net/http\"\n  \"github.com/acme/sdk\"\n)\n",
+                "src/main.rs": "use std::fmt;\nuse serde::Deserialize;\n",
+            })
+            snapshot = registry.discover([root], excluded_names=set())
+            by_specifier = {item["specifier"]: item for item in snapshot["imports"]}
+            expected = {
+                "json": "stdlib:python:json",
+                "pathlib": "stdlib:python:pathlib",
+                "node:fs": "stdlib:typescript:fs",
+                "path": "stdlib:typescript:path",
+                "net/http": "stdlib:go:net/http",
+                "std::fmt": "stdlib:rust:std",
+            }
+            for specifier, target in expected.items():
+                self.assertEqual(by_specifier[specifier]["resolution"], "stdlib", specifier)
+                self.assertEqual(by_specifier[specifier]["target_project_id"], target, specifier)
+            for specifier in ("requests", "lodash", "github.com/acme/sdk", "serde::Deserialize"):
+                self.assertEqual(by_specifier[specifier]["resolution"], "external", specifier)
+            targets = {edge["target"]["project_id"] for edge in snapshot["dependencies"]}
+            self.assertEqual([], [target for target in targets if target.startswith("stdlib:")])
+            unknown = {finding["subject"] for finding in snapshot["findings"] if finding["finding_id"] == "DEP-001"}
+            self.assertEqual([], [subject for subject in unknown if "stdlib" in subject])
+            self.assertEqual(registry.snapshot_validation_errors(snapshot), [])
+
+    def test_prose_beginning_with_import_is_not_recorded_as_an_import(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp) / "workspace"
+            make_git_project(root / "app", "https://example.test/app.git", {
+                "py/app.py": '"""Docstring.\n\nimport records keep the specifier for explainability.\n"""\nimport json\n',
+            })
+            snapshot = registry.discover([root], excluded_names=set())
+            specifiers = {item["specifier"] for item in snapshot["imports"]}
+            self.assertEqual({"json"}, specifiers)
+
     def test_scan_alias_accepts_root_after_subcommand(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp) / "workspace"
