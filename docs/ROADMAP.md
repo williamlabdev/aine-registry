@@ -126,10 +126,12 @@ This roadmap describes product outcomes, not promises of automatic support for e
   change-impact traversal unless explicitly opted in
 - [x] Establish manifests for the AINE and Control Plane portfolio roots
 - [x] Preserve the read-only boundary while producing a seven-project snapshot
-- [ ] Add real Orvena and airt evidence adapters after a shared run/correlation
-  contract is demonstrated end to end. The Registry side landed in v1.6 and was
-  demonstrated with a real Orvena run; airt has not been demonstrated, and the
-  producer-side adapters live outside this repository
+- [x] Add real Orvena and airt evidence adapters after a shared run/correlation
+  contract is demonstrated end to end. Demonstrated with a real Orvena benchmark
+  run and three real airt native-hook runs sharing one correlation identifier,
+  each joined to a stored snapshot through the local evidence store. The
+  producer-side adapters live outside this repository, and airt does not itself
+  declare the native schema identifier the observation records for it
 
 ## v1.5 — Import fidelity (released)
 
