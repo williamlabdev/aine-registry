@@ -13,3 +13,7 @@ build/
 
 # Local portfolio governance descriptor; not published with the public core.
 /manifest.yaml
+
+# Preflight reports produced by the reference workflow.
+/aine-preflight.json
+/aine-preflight.md
