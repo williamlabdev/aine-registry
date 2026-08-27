@@ -28,12 +28,12 @@ jobs:
       - name: Generate preflight evidence
         run: >-
           aine-registry preflight --root . --base origin/main
-          --output .aine-preflight.json
+          --output aine-preflight.json
 
       - name: Generate Markdown report
         run: >-
           aine-registry preflight --root . --base origin/main --format markdown
-          --output .aine-preflight.md
+          --output aine-preflight.md
         if: always()
 
       - name: Upload preflight reports
@@ -42,5 +42,5 @@ jobs:
         with:
           name: aine-preflight
           path: |
-            .aine-preflight.json
-            .aine-preflight.md
+            aine-preflight.json
+            aine-preflight.md
