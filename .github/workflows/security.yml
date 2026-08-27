@@ -31,7 +31,11 @@ jobs:
     name: OSV dependency scan
     uses: google/osv-scanner-action/.github/workflows/osv-scanner-reusable.yml@v2.5.0
     permissions:
+      # Must match or exceed the permissions the reusable workflow's job
+      # declares, or the run fails at startup before any job is scheduled.
+      actions: read
       contents: read
+      security-events: write
     with:
       scan-args: |-
         --recursive
