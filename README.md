@@ -227,6 +227,14 @@ source-of-truth authorities (`SOT-001`), and contradictory dependency status
 or strength declarations (`REL-002`). AINE reports these conditions for human
 review rather than choosing an authority automatically.
 
+An artifact a manifest declares with `status: "present"` whose path does not
+exist is reported as `ART-001` (severity `high`, category `artifact`). Nothing
+else reads a declared path back against the tree, so a source-of-truth
+authority, a high-risk path, or an approval gate can go on pointing at a file
+that was never committed. The check covers manifest-declared artifacts only:
+adapter-discovered ones are found by walking the tree, so they exist by
+construction.
+
 A project whose `manifest.yaml` declares a top-level `depends_on:` block is
 reported as `REL-003` (severity `medium`, category `dependency`). That
 descriptor predates the registry manifest and nothing resolves it, so an edge
