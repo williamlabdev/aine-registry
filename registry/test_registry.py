@@ -1158,5 +1158,75 @@ class PublicationDisclosureTests(unittest.TestCase):
             self.assertEqual(reported[0]["evidence"], ["facade/.aine/registry.json"])
 
 
+class LegacyRelationshipDeclarationTests(unittest.TestCase):
+    """Edges declared in `manifest.yaml` are reported, not read.
+
+    The loose descriptor predates the registry manifest and no tool resolves it,
+    so an edge left there drifts from the one the registry knows about. The check
+    names the descriptor; it does not try to interpret it.
+    """
+
+    @staticmethod
+    def build(temp, descriptor):
+        root = Path(temp) / "workspace"
+        files = {"README.md": "engine\n"}
+        if descriptor is not None:
+            files["manifest.yaml"] = descriptor
+        make_git_project(root / "engine", "https://example.test/engine.git", files)
+        return root
+
+    @staticmethod
+    def legacy(snapshot):
+        return [f for f in snapshot["findings"] if f["finding_id"] == "REL-003"]
+
+    def test_a_descriptor_declaring_depends_on_is_reported(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = self.build(temp, "layer: platform\ndepends_on:\n  - repo: other\n")
+            found = self.legacy(registry.discover([root], excluded_names=set()))
+            self.assertEqual(len(found), 1)
+            self.assertEqual(found[0]["severity"], "medium")
+            self.assertEqual(found[0]["subject"], "workspace.engine")
+            self.assertEqual(found[0]["evidence"], ["engine/manifest.yaml"])
+
+    def test_a_descriptor_without_relationships_is_not_reported(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = self.build(temp, "layer: platform\nsummary: an engine\n")
+            self.assertEqual(self.legacy(registry.discover([root], excluded_names=set())), [])
+
+    def test_a_project_without_a_descriptor_is_not_reported(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = self.build(temp, None)
+            self.assertEqual(self.legacy(registry.discover([root], excluded_names=set())), [])
+
+    def test_a_nested_key_named_depends_on_is_not_a_declaration(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = self.build(temp, "notes:\n  depends_on: described in prose\n")
+            self.assertEqual(self.legacy(registry.discover([root], excluded_names=set())), [])
+
+    def test_the_registry_manifest_does_not_excuse_the_descriptor(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = self.build(temp, "depends_on:\n  - repo: other\n")
+            manifest = root / "engine" / ".aine" / "registry.json"
+            manifest.parent.mkdir()
+            manifest.write_text(json.dumps({"project": {"owner": "platform"}}), encoding="utf-8")
+            self.assertEqual(len(self.legacy(registry.discover([root], excluded_names=set()))), 1)
+
+    def test_cli_reports_the_descriptor(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = self.build(temp, "depends_on:\n  - repo: other\n")
+            config = Path(temp) / "portfolio.local.json"
+            config.write_text(json.dumps({
+                "portfolio": {"name": "test"},
+                "workspace_roots": [{"id": "workspace", "path": str(root)}],
+            }), encoding="utf-8")
+            result = subprocess.run([
+                sys.executable, str(Path(__file__).parent / "aine_registry.py"),
+                "findings", "--config", str(config),
+            ], capture_output=True, text=True, check=True)
+            reported = [f for f in json.loads(result.stdout) if f["finding_id"] == "REL-003"]
+            self.assertEqual(len(reported), 1)
+            self.assertEqual(reported[0]["evidence"], ["engine/manifest.yaml"])
+
+
 if __name__ == "__main__":
     unittest.main()

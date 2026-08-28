@@ -227,6 +227,13 @@ source-of-truth authorities (`SOT-001`), and contradictory dependency status
 or strength declarations (`REL-002`). AINE reports these conditions for human
 review rather than choosing an authority automatically.
 
+A project whose `manifest.yaml` declares a top-level `depends_on:` block is
+reported as `REL-003` (severity `medium`, category `dependency`). That
+descriptor predates the registry manifest and nothing resolves it, so an edge
+left there drifts from the one the registry knows about without failing
+anything. The check names the file and stops: it does not parse the block, and
+having a registry manifest as well does not excuse it.
+
 Preflight is read-only and reports matched projects, affected projects,
 source-of-truth rules, suggested validation commands, and unresolved changes:
 
