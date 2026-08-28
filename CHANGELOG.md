@@ -11,6 +11,10 @@ All notable changes to AINE Registry are recorded here. The format follows
 ## [Unreleased]
 
 ### Added
+- The `REL-003` finding: a project whose `manifest.yaml` still declares a
+  top-level `depends_on:` block is reported, because nothing reads or resolves
+  that block and the edges in it drift from the registry manifest silently.
+
 - `published_projects` in the local configuration, and the `PRJ-002` finding it
   enables: a published project whose manifest names an unpublished project is
   reported so the edge can be moved to a relationship overlay.

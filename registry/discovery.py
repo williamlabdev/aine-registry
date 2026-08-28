@@ -62,6 +62,21 @@ def classify_project(root: Path) -> str:
     return "unknown"
 
 
+LEGACY_RELATIONSHIP_KEY_RE = re.compile(r"^depends_on\s*:", re.MULTILINE)
+
+
+def declares_legacy_relationships(root: Path) -> bool:
+    """Report whether the loose portfolio descriptor still declares edges.
+
+    Relationships belong in the registry manifest, where they are schema-checked
+    and resolved against discovered projects. A `depends_on:` block in
+    `manifest.yaml` is read by nothing, so it drifts without anything noticing.
+    Matching the key by line avoids taking on a YAML dependency for one check.
+    """
+    descriptor = root / "manifest.yaml"
+    return descriptor.exists() and bool(LEGACY_RELATIONSHIP_KEY_RE.search(read_text(descriptor, 200_000)))
+
+
 def runtime_metadata(root: Path) -> dict[str, Any]:
     languages: set[str] = set(); frameworks: set[str] = set(); entrypoints: list[str] = []
     if (root / "package.json").exists() or list(root.glob("**/package.json")): languages.add("javascript/typescript")
@@ -668,7 +683,7 @@ def source_truth_rules(projects: list[dict[str, Any]], artifacts: list[dict[str,
     return []
 
 
-def findings(projects: list[dict[str, Any]], artifacts: list[dict[str, Any]], dependencies: list[dict[str, Any]], excluded: list[dict[str, Any]], source_of_truth: list[dict[str, Any]] | None = None, raw_dependencies: list[dict[str, Any]] | None = None, alias_conflicts: list[dict[str, Any]] | None = None, published_ids: set[str] | None = None) -> list[dict[str, Any]]:
+def findings(projects: list[dict[str, Any]], artifacts: list[dict[str, Any]], dependencies: list[dict[str, Any]], excluded: list[dict[str, Any]], source_of_truth: list[dict[str, Any]] | None = None, raw_dependencies: list[dict[str, Any]] | None = None, alias_conflicts: list[dict[str, Any]] | None = None, published_ids: set[str] | None = None, legacy_relationship_manifests: list[dict[str, Any]] | None = None) -> list[dict[str, Any]]:
     result: list[dict[str, Any]] = []
     project_ids = {item["project_id"] for item in projects}
     for edge in dependencies:
@@ -699,6 +714,8 @@ def findings(projects: list[dict[str, Any]], artifacts: list[dict[str, Any]], de
         if edge["source"]["project_id"] not in published_ids or target not in project_ids or target in published_ids:
             continue
         result.append({"finding_id": "PRJ-002", "severity": "high", "category": "disclosure", "status": "exposed", "subject": edge["dependency_id"], "message": f"A published project's manifest names an unpublished project: {target}. Declare the edge as a relationship overlay instead.", "evidence": edge["evidence"]})
+    for item in legacy_relationship_manifests or []:
+        result.append({"finding_id": "REL-003", "severity": "medium", "category": "dependency", "status": "unmanaged", "subject": item["project_id"], "message": "Relationships are declared in manifest.yaml, where nothing reads or resolves them. Move them to the registry manifest.", "evidence": [item["evidence"]]})
     for conflict in alias_conflicts or []:
         result.append({"finding_id": "PRJ-001", "severity": "medium", "category": "identity", "status": "conflict", "subject": conflict["declared_id"], "message": f"Declared project id is not honored because it {conflict['reason']}: {', '.join(conflict['projects'])}", "evidence": conflict["manifests"]})
     if excluded:
@@ -761,6 +778,11 @@ def discover(workspace_roots: list[Path], excluded_names: set[str] | None = None
         for owner in (resolve_project_reference(str(item), projects, aliases) for item in published_projects or [])
         if owner is not None
     }
+    legacy_relationship_manifests = [
+        {"project_id": pid, "evidence": f"{projects_by_root[str(path)]['path']}/manifest.yaml" if projects_by_root[str(path)]["path"] != "." else "manifest.yaml"}
+        for pid, path in sorted(project_roots.items())
+        if declares_legacy_relationships(path)
+    ]
     artifacts: list[dict[str, Any]] = []
     manifest_records: list[tuple[dict[str, Any], Path, Path]] = []
     for item in active_root_paths:
@@ -830,6 +852,6 @@ def discover(workspace_roots: list[Path], excluded_names: set[str] | None = None
         "source_of_truth": source_truth_rules(projects, artifacts) + manifest_source_truth, "findings": [], "exclusions": sorted(DEFAULT_IGNORES), "excluded_projects": excluded,
         "_local_roots": [{"root_id": item["root_id"], "local_path": item["local_path"]} for item in root_records],
     }
-    snapshot["findings"] = findings(projects, artifacts, dependencies, excluded, snapshot["source_of_truth"], raw_dependencies, alias_conflicts, published_ids)
+    snapshot["findings"] = findings(projects, artifacts, dependencies, excluded, snapshot["source_of_truth"], raw_dependencies, alias_conflicts, published_ids, legacy_relationship_manifests)
     snapshot["snapshot_id"] = snapshot_hash(snapshot)
     return portable_snapshot(snapshot)
