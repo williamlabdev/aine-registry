@@ -8,6 +8,32 @@ All notable changes to AINE Registry are recorded here. The format follows
 > the MIT License. From 1.5.0 the project is distributed under Apache-2.0. See
 > [NOTICE](NOTICE) and the 1.5.0 entry below.
 
+## [Unreleased]
+
+### Added
+- `published_projects` in the local configuration, and the `PRJ-002` finding it
+  enables: a published project whose manifest names an unpublished project is
+  reported so the edge can be moved to a relationship overlay.
+
+- `project.id` in a project manifest is now honored when resolving references.
+  The field was part of the v1 manifest schema but was read nowhere, so a
+  manifest that named its peers by their declared identifiers produced only
+  external phantom edges whenever the configured root topology derived a
+  different ID. The declared value is an alias used for relationship targets,
+  overlay owners, and `impact` queries, and is reported on the project as
+  `declared_id`; the derived `project_id` remains the project's identity. A
+  declared ID claimed by two projects, or taking an identifier another project
+  is already found by, is reported as finding `PRJ-001` and left unhonored.
+- `relationship_overlays` in the local configuration declares relationships
+  outside the project repositories. A manifest travels with its project, so a
+  target named there is published wherever the project is published; an edge
+  into a private project could not be declared without publishing that
+  project's identifier. Overlay edges are merged at discovery time and behave
+  identically in queries, context bundles, and impact analysis, carrying
+  `relationship_source: "overlay"` and `<local-overlay>` evidence instead of a
+  manifest path. An overlay naming an undiscovered project is ignored rather
+  than recorded as an external edge.
+
 ## [1.7.0] - 2026-08-27
 
 ### Added

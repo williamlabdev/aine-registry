@@ -31,6 +31,16 @@ API_CONTRACT_NAMES = {
 ASYNCAPI_CONTRACT_NAMES = {"asyncapi.json", "asyncapi.yaml", "asyncapi.yml", "events.yaml", "events.yml"}
 DEPLOYMENT_NAMES = {"docker-compose.yml", "docker-compose.yaml", "compose.yml", "compose.yaml", "chart.yaml"}
 PROJECT_MANIFEST = Path(".aine/registry.json")
+RELATIONSHIP_OVERLAY_KEY = "relationship_overlays"
+# A project manifest is committed with its project, so every target it names is
+# published with it. Overlay evidence marks an edge declared in local
+# configuration instead, and carries no project-relative path by construction.
+OVERLAY_EVIDENCE = "<local-overlay>"
+RELATIONSHIP_SOURCES = {"manifest", "overlay"}
+# Projects whose repositories are published. Declared in the local configuration
+# because publication is portfolio knowledge: a private project cannot be asked
+# to prove it is private, and a public one declaring itself public proves nothing.
+PUBLISHED_PROJECTS_KEY = "published_projects"
 GENERATED_MARKERS = ("generated", "_gen.", ".generated.", "SYNC_STAMP")
 SCAN_SKIP_DIRS = {"data", "media", "models", "checkpoints", "logs", "reports", "fixtures", "vendor", "third_party"}
 IMPORT_SOURCE_EXTENSIONS = {".py", ".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs", ".go", ".rs"}

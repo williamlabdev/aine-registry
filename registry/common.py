@@ -13,9 +13,9 @@ from typing import Any
 from urllib.parse import urlsplit, urlunsplit
 
 try:
-    from .constants import LOCAL_PATH_RE
+    from .constants import LOCAL_PATH_RE, PUBLISHED_PROJECTS_KEY, RELATIONSHIP_OVERLAY_KEY
 except ImportError:  # direct execution compatibility
-    from constants import LOCAL_PATH_RE
+    from constants import LOCAL_PATH_RE, PUBLISHED_PROJECTS_KEY, RELATIONSHIP_OVERLAY_KEY
 
 
 def run_git(root: Path, *args: str) -> str:
@@ -186,3 +186,33 @@ def configured_roots(args: argparse.Namespace) -> list[Path]:
         candidate = by_id.get(value, value)
         resolved.append(Path(candidate).expanduser().resolve())
     return resolved or [Path(".").resolve()]
+
+
+def configured_overlays(args: argparse.Namespace) -> list[dict[str, Any]]:
+    """Relationship declarations kept out of the project repositories.
+
+    A project manifest travels with its project, so a target named there is
+    published wherever the project is published. Edges that must not be
+    published -- typically into private projects -- are declared in the local
+    configuration instead and merged at discovery time. The declaration is
+    identical to a manifest ``relationships`` entry; only its home differs.
+    """
+    overlays = load_local_config(args).get(RELATIONSHIP_OVERLAY_KEY, [])
+    if not isinstance(overlays, list):
+        return []
+    return [
+        item for item in overlays
+        if isinstance(item, dict) and item.get("project") and isinstance(item.get("relationships", []), list)
+    ]
+
+
+def configured_published_projects(args: argparse.Namespace) -> list[str]:
+    """Project references whose repositories are published.
+
+    Left undeclared the disclosure check stays inert: an operator who has not said
+    which projects are public gets no findings rather than a finding for every edge.
+    """
+    declared = load_local_config(args).get(PUBLISHED_PROJECTS_KEY, [])
+    if not isinstance(declared, list):
+        return []
+    return [str(item) for item in declared if isinstance(item, str) and item.strip()]
