@@ -243,14 +243,81 @@ def project_manifest(project_root: Path) -> tuple[dict[str, Any], Path | None]:
     return (data, path) if isinstance(data, dict) else ({}, None)
 
 
-def explicit_manifest_records(project: dict[str, Any], project_root: Path, workspace_root: Path, projects: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
+def declared_project_ids(projects: list[dict[str, Any]], project_roots: dict[str, Path]) -> tuple[dict[str, str], list[dict[str, Any]]]:
+    """Honor the `project.id` a manifest declares, as an alias only.
+
+    A project ID is derived from the workspace-relative path, so it changes
+    with the root topology a run is configured for, while a manifest declares
+    a fixed identifier and names its peers by that identifier. Without the
+    alias every declared relationship resolves to an external phantom whenever
+    the two disagree. The alias never replaces the derived `project_id`:
+    rewriting identity from a file inside the project would let a project
+    rename itself, and every snapshot and evidence record already refers to
+    the derived form.
+    """
+    # Every identifier `resolve_project_reference` already matches on, and who
+    # owns it. An alias may not take a name a different project answers to.
+    owners: dict[str, set[str]] = {}
+    for item in projects:
+        for key in (item["project_id"], item["name"], item["path"]):
+            owners.setdefault(key, set()).add(item["project_id"])
+    claims: dict[str, list[dict[str, Any]]] = {}
+    for item in projects:
+        root = project_roots.get(item["project_id"])
+        if root is None:
+            continue
+        data, manifest_path = project_manifest(root)
+        if manifest_path is None:
+            continue
+        metadata = data.get("project", {})
+        declared = str(metadata.get("id", "")).strip() if isinstance(metadata, dict) else ""
+        if not declared or declared == item["project_id"]:
+            continue
+        claims.setdefault(declared, []).append(item)
+    aliases: dict[str, str] = {}
+    conflicts: list[dict[str, Any]] = []
+    for declared, claimants in sorted(claims.items()):
+        reason = None
+        if len(claimants) > 1:
+            reason = "declared by more than one project"
+        elif owners.get(declared, set()) - {claimants[0]["project_id"]}:
+            reason = "shadows an identifier another project is already found by"
+        if reason:
+            # An unhonored claim stays off the project record: `declared_id`
+            # means "this identifier resolves here", and the finding carries
+            # the rejected claim for audit.
+            conflicts.append({
+                "declared_id": declared,
+                "reason": reason,
+                "projects": sorted(item["project_id"] for item in claimants),
+                "manifests": sorted(f"{item['path']}/{PROJECT_MANIFEST.as_posix()}" for item in claimants),
+            })
+            continue
+        aliases[declared] = claimants[0]["project_id"]
+        claimants[0]["declared_id"] = declared
+    return aliases, conflicts
+
+
+def resolve_project_reference(value: str, projects: list[dict[str, Any]], aliases: dict[str, str]) -> dict[str, Any] | None:
+    """Find the project a manifest or overlay names, by any identifier it may use."""
+    aliased = aliases.get(value)
+    if aliased:
+        return next((p for p in projects if p["project_id"] == aliased), None)
+    return next((p for p in projects if value in {p["project_id"], p["name"], p["path"]}), None)
+
+
+def explicit_manifest_records(project: dict[str, Any], project_root: Path, workspace_root: Path, projects: list[dict[str, Any]], overlay_relationships: list[dict[str, Any]] | None = None, aliases: dict[str, str] | None = None) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
     """Load project-owned explicit metadata without executing project code."""
     data, manifest_path = project_manifest(project_root)
-    if not data or manifest_path is None:
+    overlay_relationships = [item for item in (overlay_relationships or []) if isinstance(item, dict) and item.get("target")]
+    has_manifest = bool(data) and manifest_path is not None
+    if not has_manifest and not overlay_relationships:
         return [], [], []
+    # An overlay carries relationships only. A project reached solely through
+    # one declares no manifest, so no manifest-derived metadata is read here.
     evidence = f"{rel(workspace_root, project_root)}/{PROJECT_MANIFEST.as_posix()}"
     project_metadata = data.get("project", {})
-    if isinstance(project_metadata, dict):
+    if has_manifest and isinstance(project_metadata, dict):
         project["owner"] = project_metadata.get("owner", project.get("owner", "UNKNOWN"))
         ownership = project_metadata.get("ownership", project.get("ownership", {}))
         if isinstance(ownership, dict):
@@ -302,20 +369,26 @@ def explicit_manifest_records(project: dict[str, Any], project_root: Path, works
             "evidence": [evidence],
         })
     dependencies: list[dict[str, Any]] = []
-    declared_relationships = [(item, False) for item in data.get("dependencies", [])] + [(item, True) for item in data.get("relationships", [])]
-    for item, is_relationship in declared_relationships:
+    declared_relationships = (
+        [(item, False, "manifest") for item in data.get("dependencies", [])]
+        + [(item, True, "manifest") for item in data.get("relationships", [])]
+        + [(item, True, "overlay") for item in overlay_relationships]
+    )
+    for item, is_relationship, declared_in in declared_relationships:
         if not isinstance(item, dict) or not item.get("target"):
             continue
         target_value = str(item["target"])
-        target_project = next((p for p in projects if target_value in {p["project_id"], p["name"], p["path"]}), None)
+        target_project = resolve_project_reference(target_value, projects, aliases or {})
         target_id = target_project["project_id"] if target_project else (target_value if target_value.startswith("external:") else f"external:{target_value}")
+        item_evidence = evidence if declared_in == "manifest" else OVERLAY_EVIDENCE
+        reference = {declared_in: item_evidence, "target": target_value}
         edge = make_edge(
             project["project_id"], target_id, str(item.get("kind", item.get("relationship_type", "declared"))), str(item.get("strength", "required")), str(item.get("status", "declared")),
-            evidence, {"manifest": evidence, "target": target_value}, projects, target_project,
+            item_evidence, reference, projects, target_project,
         )
         if is_relationship or item.get("relationship_type"):
             edge["relationship_type"] = str(item.get("relationship_type", item.get("kind", "declared")))
-            edge["relationship_source"] = "manifest"
+            edge["relationship_source"] = declared_in
             if "impact" in item:
                 edge["impact"] = bool(item["impact"])
         dependencies.append(edge)
@@ -595,7 +668,7 @@ def source_truth_rules(projects: list[dict[str, Any]], artifacts: list[dict[str,
     return []
 
 
-def findings(projects: list[dict[str, Any]], artifacts: list[dict[str, Any]], dependencies: list[dict[str, Any]], excluded: list[dict[str, Any]], source_of_truth: list[dict[str, Any]] | None = None, raw_dependencies: list[dict[str, Any]] | None = None) -> list[dict[str, Any]]:
+def findings(projects: list[dict[str, Any]], artifacts: list[dict[str, Any]], dependencies: list[dict[str, Any]], excluded: list[dict[str, Any]], source_of_truth: list[dict[str, Any]] | None = None, raw_dependencies: list[dict[str, Any]] | None = None, alias_conflicts: list[dict[str, Any]] | None = None, published_ids: set[str] | None = None) -> list[dict[str, Any]]:
     result: list[dict[str, Any]] = []
     project_ids = {item["project_id"] for item in projects}
     for edge in dependencies:
@@ -616,12 +689,24 @@ def findings(projects: list[dict[str, Any]], artifacts: list[dict[str, Any]], de
         states = {(edge.get("status"), edge.get("strength")) for edge in edges}
         if len(states) > 1:
             result.append({"finding_id": "REL-002", "severity": "medium", "category": "dependency", "status": "conflict", "subject": ":".join(key), "message": "Contradictory status or strength declarations exist for the same dependency edge", "evidence": sorted({evidence for edge in edges for evidence in edge.get("evidence", [])})})
+    # A manifest is committed with its project, so a published project publishes
+    # every target its manifest names. An overlay-declared edge cannot reach here:
+    # it carries no `reference.manifest`, which is the point of declaring it there.
+    for edge in dependencies if published_ids else []:
+        if not edge.get("reference", {}).get("manifest"):
+            continue
+        target = edge["target"]["project_id"]
+        if edge["source"]["project_id"] not in published_ids or target not in project_ids or target in published_ids:
+            continue
+        result.append({"finding_id": "PRJ-002", "severity": "high", "category": "disclosure", "status": "exposed", "subject": edge["dependency_id"], "message": f"A published project's manifest names an unpublished project: {target}. Declare the edge as a relationship overlay instead.", "evidence": edge["evidence"]})
+    for conflict in alias_conflicts or []:
+        result.append({"finding_id": "PRJ-001", "severity": "medium", "category": "identity", "status": "conflict", "subject": conflict["declared_id"], "message": f"Declared project id is not honored because it {conflict['reason']}: {', '.join(conflict['projects'])}", "evidence": conflict["manifests"]})
     if excluded:
         result.append({"finding_id": "SCOPE-001", "severity": "info", "category": "scope", "status": "declared", "subject": "portfolio.exclusions", "message": "Projects explicitly excluded from the active registry scope are preserved as exclusions.", "evidence": [item["path"] for item in excluded]})
     return result
 
 
-def discover(workspace_roots: list[Path], excluded_names: set[str] | None = None) -> dict[str, Any]:
+def discover(workspace_roots: list[Path], excluded_names: set[str] | None = None, relationship_overlays: list[dict[str, Any]] | None = None, published_projects: list[str] | None = None) -> dict[str, Any]:
     excluded_names = set(excluded_names or DEFAULT_EXCLUDED_PROJECTS)
     roots = [path.resolve() for path in workspace_roots]
     portfolio_parent = Path(os.path.commonpath([str(path) for path in roots]))
@@ -658,6 +743,24 @@ def discover(workspace_roots: list[Path], excluded_names: set[str] | None = None
     projects = [p for p in projects if p["project_id"] in active_ids and p["name"] not in excluded_names]
     active_root_paths = [item for item in all_projects if projects_by_root[str(item)]["name"] not in excluded_names]
     projects_by_root = {str(path): projects_by_root[str(path)] for path in active_root_paths}
+    project_roots = {projects_by_root[str(path)]["project_id"]: path for path in active_root_paths}
+    aliases, alias_conflicts = declared_project_ids(projects, project_roots)
+    overlays_by_project: dict[str, list[dict[str, Any]]] = {}
+    for overlay in relationship_overlays or []:
+        if not isinstance(overlay, dict):
+            continue
+        declared_for = str(overlay.get("project", ""))
+        owner = resolve_project_reference(declared_for, projects, aliases)
+        if owner is None:
+            continue
+        overlays_by_project.setdefault(owner["project_id"], []).extend(
+            item for item in overlay.get("relationships", []) if isinstance(item, dict) and item.get("target")
+        )
+    published_ids = {
+        owner["project_id"]
+        for owner in (resolve_project_reference(str(item), projects, aliases) for item in published_projects or [])
+        if owner is not None
+    }
     artifacts: list[dict[str, Any]] = []
     manifest_records: list[tuple[dict[str, Any], Path, Path]] = []
     for item in active_root_paths:
@@ -667,7 +770,7 @@ def discover(workspace_roots: list[Path], excluded_names: set[str] | None = None
     manifest_dependencies: list[dict[str, Any]] = []
     manifest_source_truth: list[dict[str, Any]] = []
     for project, project_root, workspace_root in manifest_records:
-        explicit_artifacts, explicit_dependencies, explicit_source_truth = explicit_manifest_records(project, project_root, workspace_root, projects)
+        explicit_artifacts, explicit_dependencies, explicit_source_truth = explicit_manifest_records(project, project_root, workspace_root, projects, overlays_by_project.get(project["project_id"]), aliases)
         manifest_artifacts.extend(explicit_artifacts)
         manifest_dependencies.extend(explicit_dependencies)
         manifest_source_truth.extend(explicit_source_truth)
@@ -710,12 +813,12 @@ def discover(workspace_roots: list[Path], excluded_names: set[str] | None = None
             grouped[grouping_key]["dependency_id"] = stable_id("dep", grouping_key)
         else:
             grouped[grouping_key]["evidence"] = sorted(set(grouped[grouping_key]["evidence"] + edge["evidence"]))[:100]
-            if edge.get("relationship_source") == "manifest":
-                grouped[grouping_key]["relationship_source"] = "manifest"
+            if edge.get("relationship_source") in RELATIONSHIP_SOURCES:
+                grouped[grouping_key]["relationship_source"] = edge["relationship_source"]
                 if edge.get("relationship_type"):
                     grouped[grouping_key]["relationship_type"] = edge["relationship_type"]
     dependencies = sorted(grouped.values(), key=lambda e: e["dependency_id"])
-    relationships = sorted((edge for edge in dependencies if edge.get("relationship_source") == "manifest"), key=lambda e: e["dependency_id"])
+    relationships = sorted((edge for edge in dependencies if edge.get("relationship_source") in RELATIONSHIP_SOURCES), key=lambda e: e["dependency_id"])
     excluded = [{"name": Path(path).name, "path": str(path), "reason": "excluded_from_active_registry"} for path in sorted(set(excluded_paths))]
     root_data = [{k: v for k, v in item.items() if k != "local_path"} for item in root_records]
     snapshot: dict[str, Any] = {
@@ -727,6 +830,6 @@ def discover(workspace_roots: list[Path], excluded_names: set[str] | None = None
         "source_of_truth": source_truth_rules(projects, artifacts) + manifest_source_truth, "findings": [], "exclusions": sorted(DEFAULT_IGNORES), "excluded_projects": excluded,
         "_local_roots": [{"root_id": item["root_id"], "local_path": item["local_path"]} for item in root_records],
     }
-    snapshot["findings"] = findings(projects, artifacts, dependencies, excluded, snapshot["source_of_truth"], raw_dependencies)
+    snapshot["findings"] = findings(projects, artifacts, dependencies, excluded, snapshot["source_of_truth"], raw_dependencies, alias_conflicts, published_ids)
     snapshot["snapshot_id"] = snapshot_hash(snapshot)
     return portable_snapshot(snapshot)

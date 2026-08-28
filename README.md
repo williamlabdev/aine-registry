@@ -112,6 +112,18 @@ cannot be safely inferred from code or configuration:
 The v0.3 manifest is JSON to keep the core dependency-free. YAML adapters are
 planned for a future release.
 
+The optional `project.id` declares the identifier by which the project expects
+to be named. A project ID is otherwise derived from the workspace-relative
+path, so it changes with the root topology a run is configured for, while a
+manifest is written once and names its peers by a fixed identifier. The
+declared value resolves references -- relationship targets, overlay owners,
+and `impact` queries -- and is reported on the project as `declared_id`. It
+never replaces the derived `project_id`: a project may not rename itself from
+inside its own tree, and snapshots and evidence records already refer to the
+derived form. A declared identifier that two projects claim, or that takes an
+identifier another project is already found by, is reported as finding
+`PRJ-001` and left unhonored rather than resolving to the wrong project.
+
 The optional `project.commands` object declares portable validation commands
 (`test`, `verify`, `lint`, and `build`) for preflight. Commands are recorded as
 evidence and surfaced in the report; the Registry never executes them. A string
@@ -133,6 +145,63 @@ aine-registry relationships --root /path/to/workspace --relationship-status plan
 
 Snapshots expose the same records under `relationships`; the original
 `dependencies` collection remains available for compatibility.
+
+### Relationships that must not be published
+
+A project manifest is committed with its project, so every target it names is
+published wherever the project is published. A public repository that declares
+an edge into a private one therefore publishes that private project's
+existence and identifier, whatever the manifest says about anything else.
+
+Declare such an edge in the local configuration instead of the manifest.
+The configuration is the file `aine-registry init` writes,
+`.aine/portfolio.local.json` by default and `--config` otherwise; it belongs
+to the operator, not to any project:
+
+```json
+{
+  "workspace_roots": [{"id": "workspace", "path": "/path/to/workspace"}],
+  "relationship_overlays": [
+    {
+      "project": "workspace.payments-api",
+      "relationships": [
+        {"target": "workspace.payments-core", "relationship_type": "implements", "impact": true}
+      ]
+    }
+  ]
+}
+```
+
+`project` accepts the same identifiers as a relationship target (project ID,
+project name, or workspace-relative path), and each entry is the same shape as
+a manifest `relationships` entry. Overlay edges are merged at discovery time
+and behave identically in queries, context bundles, and impact analysis; they
+are distinguished only by `relationship_source: "overlay"` and by carrying
+`<local-overlay>` as evidence rather than a manifest path. An overlay entry
+naming a project that discovery did not find is ignored rather than recorded
+as an external edge.
+
+The local configuration is not part of any project repository, so the private
+identifier stays out of every published tree and out of git history. This is
+the mechanism the public-core boundary below refers to: the graph stays whole
+locally without the manifests naming what must not be named.
+
+Declaring which projects are published turns the convention into a check.
+`published_projects` accepts the same identifiers as a relationship target:
+
+```json
+{
+  "published_projects": ["workspace.payments-api", "workspace.docs"]
+}
+```
+
+A manifest-declared edge from a published project to a project that is not
+listed is reported as `PRJ-002` (severity `high`, category `disclosure`). The
+same edge declared as an overlay is not: an overlay carries no manifest
+reference, which is what the check tests for. Leaving `published_projects`
+undeclared leaves the check inert rather than reporting every edge, and a
+target discovery did not resolve is not reported, because publication cannot
+be decided for a project the scan never saw.
 
 Build a scoped agent context bundle with:
 

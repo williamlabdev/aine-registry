@@ -68,7 +68,7 @@ def write_local_config(args: argparse.Namespace) -> int:
 
 
 def project_matches(snapshot: dict[str, Any], value: str) -> list[dict[str, Any]]:
-    return [p for p in snapshot["projects"] if value in {p["project_id"], p["name"], p["path"], p["checkout_id"], p["repository_id"]} or value in p["project_id"]]
+    return [p for p in snapshot["projects"] if value in {p["project_id"], p["name"], p["path"], p["checkout_id"], p["repository_id"], p.get("declared_id")} or value in p["project_id"]]
 
 
 def impact(snapshot: dict[str, Any], seed: str) -> dict[str, Any]:

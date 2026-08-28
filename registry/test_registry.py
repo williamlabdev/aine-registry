@@ -871,5 +871,292 @@ class MultiRootRegistryTests(unittest.TestCase):
             self.assertFalse(provider["direct_edges"])
 
 
+class RelationshipOverlayTests(unittest.TestCase):
+    """A relationship whose target must not be published with the source repo.
+
+    A project manifest is committed with its project, so naming a private
+    project there publishes that project's existence. The overlay keeps the
+    declaration in local configuration and merges it at discovery time.
+    """
+
+    def test_overlay_declares_an_edge_the_manifest_never_names(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp) / "workspace"
+            make_git_project(root / "facade", "https://example.test/facade.git", {"README.md": "facade\n"})
+            make_git_project(root / "engine", "https://example.test/engine.git", {"README.md": "engine\n"})
+            manifest = root / "facade" / ".aine" / "registry.json"
+            manifest.parent.mkdir()
+            manifest.write_text(json.dumps({"project": {"owner": "platform"}}), encoding="utf-8")
+            snapshot = registry.discover([root], excluded_names=set(), relationship_overlays=[
+                {"project": "workspace.facade", "relationships": [
+                    {"target": "workspace.engine", "relationship_type": "implements", "kind": "governance"},
+                ]},
+            ])
+            self.assertNotIn("engine", manifest.read_text(encoding="utf-8"))
+            overlay_edges = [e for e in snapshot["relationships"] if e.get("relationship_source") == "overlay"]
+            self.assertEqual(len(overlay_edges), 1)
+            edge = overlay_edges[0]
+            self.assertEqual(edge["source"]["project_id"], "workspace.facade")
+            self.assertEqual(edge["target"]["project_id"], "workspace.engine")
+            self.assertEqual(edge["relationship_type"], "implements")
+            self.assertEqual(edge["evidence"], ["<local-overlay>"])
+            self.assertEqual(registry.snapshot_validation_errors(snapshot), [])
+
+    def test_overlay_applies_to_a_project_that_has_no_manifest(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp) / "workspace"
+            make_git_project(root / "facade", "https://example.test/facade.git", {"README.md": "facade\n"})
+            make_git_project(root / "engine", "https://example.test/engine.git", {"README.md": "engine\n"})
+            self.assertFalse((root / "facade" / ".aine").exists())
+            snapshot = registry.discover([root], excluded_names=set(), relationship_overlays=[
+                {"project": "facade", "relationships": [{"target": "workspace.engine", "relationship_type": "implements"}]},
+            ])
+            self.assertEqual([e["target"]["project_id"] for e in snapshot["relationships"]], ["workspace.engine"])
+
+    def test_overlay_edge_carries_no_local_path_into_a_portable_snapshot(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp) / "workspace"
+            make_git_project(root / "facade", "https://example.test/facade.git", {"README.md": "facade\n"})
+            make_git_project(root / "engine", "https://example.test/engine.git", {"README.md": "engine\n"})
+            snapshot = registry.discover([root], excluded_names=set(), relationship_overlays=[
+                {"project": "workspace.facade", "relationships": [{"target": "workspace.engine", "relationship_type": "implements"}]},
+            ])
+            self.assertTrue(registry.no_absolute_paths(snapshot))
+            self.assertNotIn(str(root), json.dumps(snapshot))
+
+    def test_overlay_relationship_opts_into_impact_the_same_way_a_manifest_does(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp) / "workspace"
+            make_git_project(root / "facade", "https://example.test/facade.git", {"README.md": "facade\n"})
+            make_git_project(root / "engine", "https://example.test/engine.git", {"README.md": "engine\n"})
+            overlay = [{"project": "workspace.facade", "relationships": [
+                {"target": "workspace.engine", "relationship_type": "implements", "kind": "governance"},
+            ]}]
+            without = registry.discover([root], excluded_names=set(), relationship_overlays=overlay)
+            self.assertFalse(registry.impact(without, "workspace.engine")["direct_edges"])
+            overlay[0]["relationships"][0]["impact"] = True
+            with_impact = registry.discover([root], excluded_names=set(), relationship_overlays=overlay)
+            self.assertEqual(
+                [e["source"]["project_id"] for e in registry.impact(with_impact, "workspace.engine")["direct_edges"]],
+                ["workspace.facade"],
+            )
+
+    def test_unresolvable_overlay_project_is_ignored_rather_than_invented(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp) / "workspace"
+            make_git_project(root / "facade", "https://example.test/facade.git", {"README.md": "facade\n"})
+            snapshot = registry.discover([root], excluded_names=set(), relationship_overlays=[
+                {"project": "workspace.gone", "relationships": [{"target": "workspace.facade"}]},
+                {"project": "workspace.facade", "relationships": ["not-an-object", {"kind": "governance"}]},
+            ])
+            self.assertEqual(snapshot["relationships"], [])
+            self.assertEqual(registry.snapshot_validation_errors(snapshot), [])
+
+    def test_cli_reads_relationship_overlays_from_local_config(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp) / "workspace"
+            make_git_project(root / "facade", "https://example.test/facade.git", {"README.md": "facade\n"})
+            make_git_project(root / "engine", "https://example.test/engine.git", {"README.md": "engine\n"})
+            config = Path(temp) / "portfolio.local.json"
+            config.write_text(json.dumps({
+                "portfolio": {"name": "test"},
+                "workspace_roots": [{"id": "workspace", "path": str(root)}],
+                "relationship_overlays": [
+                    {"project": "workspace.facade", "relationships": [
+                        {"target": "workspace.engine", "relationship_type": "implements"},
+                    ]},
+                ],
+            }), encoding="utf-8")
+            result = subprocess.run([
+                sys.executable, str(Path(__file__).parent / "aine_registry.py"),
+                "relationships", "--config", str(config),
+            ], capture_output=True, text=True, check=True)
+            edges = json.loads(result.stdout)
+            self.assertEqual([e["relationship_source"] for e in edges], ["overlay"])
+            self.assertEqual(edges[0]["target"]["project_id"], "workspace.engine")
+
+
+class DeclaredProjectIdTests(unittest.TestCase):
+    """`project.id` is part of the manifest contract and names peers.
+
+    A derived project ID moves with the workspace root topology a run is
+    configured for. A manifest cannot know that topology, so it declares a
+    fixed identifier and names its peers by the same. The declared identifier
+    resolves references; it never replaces the derived identity.
+    """
+
+    @staticmethod
+    def build(temp: str, facade_manifest: dict | None, engine_manifest: dict | None) -> Path:
+        root = Path(temp) / "workspace"
+        for name, manifest in (("facade", facade_manifest), ("engine", engine_manifest)):
+            make_git_project(root / name, f"https://example.test/{name}.git", {"README.md": f"{name}\n"})
+            if manifest is not None:
+                (root / name / ".aine").mkdir()
+                (root / name / ".aine" / "registry.json").write_text(json.dumps(manifest), encoding="utf-8")
+        return root
+
+    def test_declared_id_resolves_a_target_the_derived_id_would_not_match(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = self.build(
+                temp,
+                {"relationships": [{"target": "tools.engine", "relationship_type": "implements"}]},
+                {"project": {"id": "tools.engine"}},
+            )
+            snapshot = registry.discover([root], excluded_names=set())
+            self.assertEqual([e["target"]["project_id"] for e in snapshot["relationships"]], ["workspace.engine"])
+            self.assertEqual(snapshot["relationships"][0]["scope"], "intra_root")
+            self.assertEqual([f for f in snapshot["findings"] if f["finding_id"] == "PRJ-001"], [])
+
+    def test_declared_id_is_an_alias_and_not_the_project_identity(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = self.build(temp, None, {"project": {"id": "tools.engine"}})
+            snapshot = registry.discover([root], excluded_names=set())
+            engine = next(p for p in snapshot["projects"] if p["name"] == "engine")
+            self.assertEqual(engine["project_id"], "workspace.engine")
+            self.assertEqual(engine["declared_id"], "tools.engine")
+            facade = next(p for p in snapshot["projects"] if p["name"] == "facade")
+            self.assertNotIn("declared_id", facade)
+
+    def test_an_id_declared_by_two_projects_is_reported_and_not_honored(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = self.build(
+                temp,
+                {"project": {"id": "tools.shared"}, "relationships": [{"target": "tools.shared", "relationship_type": "implements"}]},
+                {"project": {"id": "tools.shared"}},
+            )
+            snapshot = registry.discover([root], excluded_names=set())
+            self.assertEqual([e["target"]["project_id"] for e in snapshot["relationships"]], ["external:tools.shared"])
+            conflicts = [f for f in snapshot["findings"] if f["finding_id"] == "PRJ-001"]
+            self.assertEqual(len(conflicts), 1)
+            self.assertIn("more than one project", conflicts[0]["message"])
+            self.assertEqual(conflicts[0]["subject"], "tools.shared")
+            self.assertEqual(conflicts[0]["evidence"], ["engine/.aine/registry.json", "facade/.aine/registry.json"])
+            self.assertEqual([p["name"] for p in snapshot["projects"] if "declared_id" in p], [])
+
+    def test_a_declared_id_may_not_shadow_another_projects_derived_id(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = self.build(
+                temp,
+                {"relationships": [{"target": "workspace.facade", "relationship_type": "self_reference"}]},
+                {"project": {"id": "workspace.facade"}},
+            )
+            snapshot = registry.discover([root], excluded_names=set())
+            self.assertEqual([e["target"]["project_id"] for e in snapshot["relationships"]], ["workspace.facade"])
+            conflicts = [f for f in snapshot["findings"] if f["finding_id"] == "PRJ-001"]
+            self.assertEqual(len(conflicts), 1)
+            self.assertIn("shadows", conflicts[0]["message"])
+
+    def test_a_declared_id_may_not_shadow_another_projects_name(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = self.build(temp, None, {"project": {"id": "facade"}})
+            snapshot = registry.discover([root], excluded_names=set())
+            conflicts = [f for f in snapshot["findings"] if f["finding_id"] == "PRJ-001"]
+            self.assertEqual([c["subject"] for c in conflicts], ["facade"])
+            self.assertEqual([p["name"] for p in snapshot["projects"] if "declared_id" in p], [])
+
+    def test_a_declared_id_matching_the_projects_own_name_is_honored(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = self.build(temp, None, {"project": {"id": "engine"}})
+            snapshot = registry.discover([root], excluded_names=set())
+            self.assertEqual([f for f in snapshot["findings"] if f["finding_id"] == "PRJ-001"], [])
+            engine = next(p for p in snapshot["projects"] if p["name"] == "engine")
+            self.assertEqual(engine["declared_id"], "engine")
+
+    def test_an_overlay_may_name_its_project_by_the_declared_id(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = self.build(temp, {"project": {"id": "tools.facade"}}, {"project": {"id": "tools.engine"}})
+            snapshot = registry.discover([root], excluded_names=set(), relationship_overlays=[
+                {"project": "tools.facade", "relationships": [{"target": "tools.engine", "relationship_type": "implements"}]},
+            ])
+            edge = snapshot["relationships"][0]
+            self.assertEqual(edge["source"]["project_id"], "workspace.facade")
+            self.assertEqual(edge["target"]["project_id"], "workspace.engine")
+            self.assertEqual(edge["relationship_source"], "overlay")
+
+    def test_impact_queries_accept_the_declared_id(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = self.build(temp, None, {"project": {"id": "tools.engine"}})
+            snapshot = registry.discover([root], excluded_names=set())
+            self.assertEqual([p["name"] for p in registry.impact(snapshot, "tools.engine")["matched_projects"]], ["engine"])
+
+
+class PublicationDisclosureTests(unittest.TestCase):
+    """A published manifest must not name a project that is not published.
+
+    This is the gate the overlay exists to satisfy: the same edge is a finding
+    when the manifest declares it and silent when the overlay does.
+    """
+
+    @staticmethod
+    def build(temp, facade_relationships):
+        root = Path(temp) / "workspace"
+        make_git_project(root / "facade", "https://example.test/facade.git", {"README.md": "facade\n"})
+        make_git_project(root / "engine", "https://example.test/engine.git", {"README.md": "engine\n"})
+        manifest = root / "facade" / ".aine" / "registry.json"
+        manifest.parent.mkdir()
+        manifest.write_text(json.dumps({"project": {"owner": "platform"}, "relationships": facade_relationships}), encoding="utf-8")
+        return root
+
+    @staticmethod
+    def disclosures(snapshot):
+        return [f for f in snapshot["findings"] if f["finding_id"] == "PRJ-002"]
+
+    def test_published_manifest_naming_an_unpublished_project_is_reported(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = self.build(temp, [{"target": "workspace.engine", "relationship_type": "implements", "kind": "governance"}])
+            snapshot = registry.discover([root], excluded_names=set(), published_projects=["workspace.facade"])
+            found = self.disclosures(snapshot)
+            self.assertEqual(len(found), 1)
+            self.assertEqual(found[0]["severity"], "high")
+            self.assertIn("workspace.engine", found[0]["message"])
+            self.assertEqual(found[0]["evidence"], ["facade/.aine/registry.json"])
+
+    def test_the_same_edge_declared_as_an_overlay_is_not_a_disclosure(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = self.build(temp, [])
+            snapshot = registry.discover(
+                [root], excluded_names=set(),
+                relationship_overlays=[{"project": "workspace.facade", "relationships": [
+                    {"target": "workspace.engine", "relationship_type": "implements", "kind": "governance"}]}],
+                published_projects=["workspace.facade"],
+            )
+            self.assertEqual(len(snapshot["relationships"]), 1)
+            self.assertEqual(self.disclosures(snapshot), [])
+
+    def test_an_unpublished_project_may_name_anything_in_its_manifest(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = self.build(temp, [{"target": "workspace.engine", "relationship_type": "implements", "kind": "governance"}])
+            snapshot = registry.discover([root], excluded_names=set(), published_projects=["workspace.engine"])
+            self.assertEqual(self.disclosures(snapshot), [])
+
+    def test_an_edge_between_two_published_projects_is_not_a_disclosure(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = self.build(temp, [{"target": "workspace.engine", "relationship_type": "implements", "kind": "governance"}])
+            snapshot = registry.discover([root], excluded_names=set(), published_projects=["workspace.facade", "workspace.engine"])
+            self.assertEqual(self.disclosures(snapshot), [])
+
+    def test_the_check_is_inert_until_publication_is_declared(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = self.build(temp, [{"target": "workspace.engine", "relationship_type": "implements", "kind": "governance"}])
+            self.assertEqual(self.disclosures(registry.discover([root], excluded_names=set())), [])
+
+    def test_cli_reads_published_projects_from_local_config(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = self.build(temp, [{"target": "workspace.engine", "relationship_type": "implements", "kind": "governance"}])
+            config = Path(temp) / "portfolio.local.json"
+            config.write_text(json.dumps({
+                "portfolio": {"name": "test"},
+                "workspace_roots": [{"id": "workspace", "path": str(root)}],
+                "published_projects": ["workspace.facade"],
+            }), encoding="utf-8")
+            result = subprocess.run([
+                sys.executable, str(Path(__file__).parent / "aine_registry.py"),
+                "findings", "--config", str(config),
+            ], capture_output=True, text=True, check=True)
+            reported = [f for f in json.loads(result.stdout) if f["finding_id"] == "PRJ-002"]
+            self.assertEqual(len(reported), 1)
+            self.assertEqual(reported[0]["evidence"], ["facade/.aine/registry.json"])
+
+
 if __name__ == "__main__":
     unittest.main()

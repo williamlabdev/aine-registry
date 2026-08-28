@@ -22,7 +22,6 @@
     {"id": "registry-manifest-schema", "path": "registry/schema/project-manifest.v1.schema.json", "kind": "project_manifest_schema", "role": "schema", "source_of_truth": "registry.manifest_schema", "status": "present", "risk": "critical", "approval_required": true}
   ],
   "relationships": [
-    {"target": "tools.aine-control-plane", "relationship_type": "snapshot_provider", "kind": "governance", "strength": "required", "status": "planned"},
     {"target": "tools.aine-control-plane-core", "relationship_type": "contract_consumer", "kind": "governance", "strength": "planned", "status": "planned"}
   ],
   "source_of_truth": [
