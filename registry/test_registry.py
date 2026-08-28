@@ -1228,5 +1228,74 @@ class LegacyRelationshipDeclarationTests(unittest.TestCase):
             self.assertEqual(reported[0]["evidence"], ["engine/manifest.yaml"])
 
 
+class DeclaredArtifactExistenceTests(unittest.TestCase):
+    """A manifest may not declare a file present that is not there.
+
+    Everything a manifest hangs off an artifact — a source-of-truth authority,
+    a high-risk path, an approval gate — is void when the file is absent, and
+    nothing else in discovery reads the declared path back against the tree.
+    """
+
+    @staticmethod
+    def build(temp, artifacts, files=None):
+        root = Path(temp) / "workspace"
+        make_git_project(root / "engine", "https://example.test/engine.git", {"README.md": "engine\n", **(files or {})})
+        manifest = root / "engine" / ".aine" / "registry.json"
+        manifest.parent.mkdir()
+        manifest.write_text(json.dumps({"project": {"owner": "platform"}, "artifacts": artifacts}), encoding="utf-8")
+        return root
+
+    @staticmethod
+    def missing(snapshot):
+        return [f for f in snapshot["findings"] if f["finding_id"] == "ART-001"]
+
+    def test_a_declared_present_artifact_that_is_absent_is_reported(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = self.build(temp, [{"id": "gone", "path": "src/gone.py", "status": "present"}])
+            found = self.missing(registry.discover([root], excluded_names=set()))
+            self.assertEqual(len(found), 1)
+            self.assertEqual(found[0]["severity"], "high")
+            self.assertEqual(found[0]["subject"], "gone")
+            self.assertIn("engine/src/gone.py", found[0]["message"])
+            self.assertEqual(found[0]["evidence"], ["engine/.aine/registry.json"])
+
+    def test_a_declared_present_artifact_that_exists_is_not_reported(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = self.build(temp, [{"id": "here", "path": "src/here.py", "status": "present"}], {"src/here.py": "x = 1\n"})
+            self.assertEqual(self.missing(registry.discover([root], excluded_names=set())), [])
+
+    def test_a_declared_present_directory_counts_as_existing(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = self.build(temp, [{"id": "tree", "path": "src", "status": "present"}], {"src/here.py": "x = 1\n"})
+            self.assertEqual(self.missing(registry.discover([root], excluded_names=set())), [])
+
+    def test_an_artifact_not_declared_present_is_not_reported(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = self.build(temp, [{"id": "later", "path": "src/later.py", "status": "planned"}])
+            self.assertEqual(self.missing(registry.discover([root], excluded_names=set())), [])
+
+    def test_the_check_does_not_reach_adapter_discovered_artifacts(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp) / "workspace"
+            make_git_project(root / "engine", "https://example.test/engine.git", {"README.md": "engine\n"})
+            self.assertEqual(self.missing(registry.discover([root], excluded_names=set())), [])
+
+    def test_cli_reports_the_missing_artifact(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = self.build(temp, [{"id": "gone", "path": "src/gone.py", "status": "present"}])
+            config = Path(temp) / "portfolio.local.json"
+            config.write_text(json.dumps({
+                "portfolio": {"name": "test"},
+                "workspace_roots": [{"id": "workspace", "path": str(root)}],
+            }), encoding="utf-8")
+            result = subprocess.run([
+                sys.executable, str(Path(__file__).parent / "aine_registry.py"),
+                "findings", "--config", str(config),
+            ], capture_output=True, text=True, check=True)
+            reported = [f for f in json.loads(result.stdout) if f["finding_id"] == "ART-001"]
+            self.assertEqual(len(reported), 1)
+            self.assertEqual(reported[0]["evidence"], ["engine/.aine/registry.json"])
+
+
 if __name__ == "__main__":
     unittest.main()

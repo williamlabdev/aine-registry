@@ -11,6 +11,11 @@ All notable changes to AINE Registry are recorded here. The format follows
 ## [Unreleased]
 
 ### Added
+- The `ART-001` finding: an artifact a manifest declares as present whose path
+  does not exist is reported, because every claim hanging off it — a
+  source-of-truth authority, a high-risk path, an approval gate — is void while
+  nothing reads the declared path back against the tree.
+
 - The `REL-003` finding: a project whose `manifest.yaml` still declares a
   top-level `depends_on:` block is reported, because nothing reads or resolves
   that block and the edges in it drift from the registry manifest silently.

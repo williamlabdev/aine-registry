@@ -370,6 +370,9 @@ def explicit_manifest_records(project: dict[str, Any], project_root: Path, works
             "root_id": project["root_id"],
             "path": path,
             "workspace_path": f"{project['path']}/{path}" if project["path"] != "." else path,
+            # Recorded only for manifest-declared artifacts. Adapter-discovered
+            # ones are found by walking the tree, so they exist by construction.
+            "exists": path != "<local-path>" and (project_root / path).exists(),
             "artifact_type": Path(path).suffix.lstrip(".") or "file",
             "kind": item.get("kind", Path(path).suffix.lstrip(".") or "file"),
             "role": item.get("role", "unknown"),
@@ -714,6 +717,12 @@ def findings(projects: list[dict[str, Any]], artifacts: list[dict[str, Any]], de
         if edge["source"]["project_id"] not in published_ids or target not in project_ids or target in published_ids:
             continue
         result.append({"finding_id": "PRJ-002", "severity": "high", "category": "disclosure", "status": "exposed", "subject": edge["dependency_id"], "message": f"A published project's manifest names an unpublished project: {target}. Declare the edge as a relationship overlay instead.", "evidence": edge["evidence"]})
+    # A manifest that declares a file present when it is not makes every claim
+    # hanging off it void: a source-of-truth authority with no authority, a
+    # high-risk path guarding nothing, an approval gate on an absent file.
+    for item in artifacts:
+        if item.get("status") == "present" and item.get("exists") is False:
+            result.append({"finding_id": "ART-001", "severity": "high", "category": "artifact", "status": "missing", "subject": item["artifact_id"], "message": f"A manifest declares an artifact as present that does not exist: {item['workspace_path']}", "evidence": item["evidence"]})
     for item in legacy_relationship_manifests or []:
         result.append({"finding_id": "REL-003", "severity": "medium", "category": "dependency", "status": "unmanaged", "subject": item["project_id"], "message": "Relationships are declared in manifest.yaml, where nothing reads or resolves them. Move them to the registry manifest.", "evidence": [item["evidence"]]})
     for conflict in alias_conflicts or []:
