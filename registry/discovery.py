@@ -730,7 +730,22 @@ def findings(projects: list[dict[str, Any]], artifacts: list[dict[str, Any]], de
     result: list[dict[str, Any]] = []
     project_ids = {item["project_id"] for item in projects}
     for edge in dependencies:
-        if edge["target"]["project_id"].startswith("external:") or edge["target"]["project_id"] not in project_ids:
+        if not (edge["target"]["project_id"].startswith("external:") or edge["target"]["project_id"] not in project_ids):
+            continue
+        # A hand-written declaration whose target no project answers to is a
+        # broken reference, not an external provider. Resolution coerces it to
+        # `external:` so the edge stays recordable, but reporting that as
+        # DEP-001 info would bless the misclassification: a typo in `target`
+        # would read as a legitimate third-party provider, at the severity of
+        # an ordinary npm import, and never surface. An intentional external
+        # provider says so with an explicit `external:` prefix, which is
+        # exactly the case DEP-001 keeps. Derived edges (imports, packages,
+        # path references) carry no declared target and also stay with DEP-001.
+        reference = edge.get("reference", {})
+        declared = reference.get("target")
+        if isinstance(declared, str) and not declared.startswith("external:") and (reference.get("manifest") or reference.get("overlay")):
+            result.append({"finding_id": "REL-004", "severity": "medium", "category": "dependency", "status": "dangling", "subject": edge["dependency_id"], "message": f"A declared edge names a target that no project answers to: {declared}. Fix the reference, or declare an intentional third-party provider as external:{declared}.", "evidence": edge["evidence"]})
+        else:
             result.append({"finding_id": "DEP-001", "severity": "info", "category": "dependency", "status": "unknown", "subject": edge["dependency_id"], "message": f"Dependency provider is external or unresolved: {edge['target']['project_id']}", "evidence": edge["evidence"]})
     sot_by_domain: dict[str, list[dict[str, Any]]] = {}
     for rule in source_of_truth or []:

@@ -1229,6 +1229,101 @@ class LegacyRelationshipDeclarationTests(unittest.TestCase):
             self.assertEqual(reported[0]["evidence"], ["engine/manifest.yaml"])
 
 
+class DanglingDeclaredTargetTests(unittest.TestCase):
+    """A declared edge whose target no project answers to is a broken reference.
+
+    Resolution coerces an unmatched target to an `external:` provider so the
+    edge stays recordable, but a typo in a hand-written `target` is not a
+    third-party provider: reported as DEP-001 info it would sit among ordinary
+    package imports and never surface.
+    """
+
+    @staticmethod
+    def build(temp, manifest_body):
+        root = Path(temp) / "workspace"
+        make_git_project(root / "engine", "https://example.test/engine.git", {"README.md": "engine\n"})
+        make_git_project(root / "consumer", "https://example.test/consumer.git", {"README.md": "consumer\n"})
+        if manifest_body is not None:
+            manifest = root / "consumer" / ".aine" / "registry.json"
+            manifest.parent.mkdir()
+            manifest.write_text(json.dumps(manifest_body), encoding="utf-8")
+        return root
+
+    @staticmethod
+    def dangling(snapshot):
+        return [f for f in snapshot["findings"] if f["finding_id"] == "REL-004"]
+
+    def test_a_relationship_target_no_project_answers_to_is_reported(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = self.build(temp, {"relationships": [{"target": "workspace.enginee", "relationship_type": "snapshot_consumer", "kind": "governance"}]})
+            snapshot = registry.discover([root], excluded_names=set())
+            found = self.dangling(snapshot)
+            self.assertEqual(len(found), 1)
+            self.assertEqual(found[0]["severity"], "medium")
+            self.assertEqual(found[0]["status"], "dangling")
+            self.assertIn("workspace.enginee", found[0]["message"])
+            self.assertEqual(found[0]["evidence"], ["consumer/.aine/registry.json"])
+
+    def test_the_dangling_edge_is_not_also_downgraded_to_dep_001(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = self.build(temp, {"relationships": [{"target": "workspace.enginee", "relationship_type": "snapshot_consumer", "kind": "governance"}]})
+            snapshot = registry.discover([root], excluded_names=set())
+            subject = self.dangling(snapshot)[0]["subject"]
+            dep = [f for f in snapshot["findings"] if f["finding_id"] == "DEP-001" and f["subject"] == subject]
+            self.assertEqual(dep, [])
+
+    def test_a_declared_dependency_target_is_covered_too(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = self.build(temp, {"dependencies": [{"target": "workspace.ghost", "kind": "runtime_api", "status": "active"}]})
+            found = self.dangling(registry.discover([root], excluded_names=set()))
+            self.assertEqual(len(found), 1)
+            self.assertIn("workspace.ghost", found[0]["message"])
+
+    def test_a_target_that_resolves_is_not_reported(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = self.build(temp, {"relationships": [{"target": "workspace.engine", "relationship_type": "snapshot_consumer", "kind": "governance"}]})
+            self.assertEqual(self.dangling(registry.discover([root], excluded_names=set())), [])
+
+    def test_a_target_that_resolves_by_name_is_not_reported(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = self.build(temp, {"relationships": [{"target": "engine", "relationship_type": "snapshot_consumer", "kind": "governance"}]})
+            self.assertEqual(self.dangling(registry.discover([root], excluded_names=set())), [])
+
+    def test_an_explicit_external_provider_stays_with_dep_001(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = self.build(temp, {"dependencies": [{"target": "external:redis", "kind": "runtime_api", "status": "active"}]})
+            snapshot = registry.discover([root], excluded_names=set())
+            self.assertEqual(self.dangling(snapshot), [])
+            self.assertTrue(any(f["finding_id"] == "DEP-001" and "external:redis" in f["message"] for f in snapshot["findings"]))
+
+    def test_an_overlay_declared_dangling_target_is_reported(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = self.build(temp, None)
+            snapshot = registry.discover([root], excluded_names=set(), relationship_overlays=[
+                {"project": "workspace.consumer", "relationships": [{"target": "workspace.ghost", "relationship_type": "snapshot_consumer", "kind": "governance"}]},
+            ])
+            found = self.dangling(snapshot)
+            self.assertEqual(len(found), 1)
+            self.assertIn("workspace.ghost", found[0]["message"])
+            self.assertEqual(found[0]["evidence"], ["<local-overlay>"])
+
+    def test_cli_reports_the_dangling_target(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = self.build(temp, {"relationships": [{"target": "workspace.enginee", "relationship_type": "snapshot_consumer", "kind": "governance"}]})
+            config = Path(temp) / "portfolio.local.json"
+            config.write_text(json.dumps({
+                "portfolio": {"name": "test"},
+                "workspace_roots": [{"id": "workspace", "path": str(root)}],
+            }), encoding="utf-8")
+            result = subprocess.run([
+                sys.executable, str(Path(__file__).parent / "aine_registry.py"),
+                "findings", "--config", str(config),
+            ], capture_output=True, text=True, check=True)
+            reported = [f for f in json.loads(result.stdout) if f["finding_id"] == "REL-004"]
+            self.assertEqual(len(reported), 1)
+            self.assertEqual(reported[0]["evidence"], ["consumer/.aine/registry.json"])
+
+
 class DeclaredArtifactExistenceTests(unittest.TestCase):
     """A manifest may not declare a file present that is not there.
 
