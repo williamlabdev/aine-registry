@@ -23,7 +23,7 @@ from typing import Any
 SCHEMA = "core.portfolio.inventory.v1"
 
 # group name in the inventory -> lifecycle recorded on the project
-REPOSITORY_GROUPS = {"active_core": "active", "active_private": "active-private"}
+REPOSITORY_GROUPS = {"active_core": "active", "active_projects": "active", "active_private": "active-private"}
 VENDORED_GROUP = "vendored_git_checkouts"
 NON_PROJECT_GROUP = "non_projects"
 

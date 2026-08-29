@@ -1638,6 +1638,16 @@ class InventoryJoinTests(unittest.TestCase):
         self.assertEqual(snapshot["inventory"]["drift"], {"declared_not_discovered": [], "discovered_not_declared": []})
         self.assertEqual([item for item in snapshot["findings"] if item["finding_id"].startswith("INV-")], [])
 
+    def test_a_checkout_declared_under_active_projects_is_classified_active(self):
+        snapshot = self.snapshot(INVENTORY_DOCUMENT.replace(
+            "  active_core:\n    - path: ws/alpha\n",
+            "  active_projects:\n    - path: ws/alpha\n  active_core:\n",
+        ))
+        alpha = self.classification_of(snapshot, "alpha")
+        self.assertEqual(alpha["lifecycle"], "active")
+        self.assertEqual(alpha["group"], "active_projects")
+        self.assertEqual([item for item in snapshot["findings"] if item["finding_id"].startswith("INV-")], [])
+
     def test_a_declared_checkout_that_does_not_exist_is_reported(self):
         snapshot = self.snapshot(INVENTORY_DOCUMENT.replace("    - path: ws/alpha\n", "    - path: ws/alpha\n    - path: ws/ghost\n"))
         self.assertEqual(snapshot["inventory"]["drift"]["declared_not_discovered"], ["ws/ghost"])
