@@ -41,6 +41,7 @@ RELATIONSHIP_SOURCES = {"manifest", "overlay"}
 # because publication is portfolio knowledge: a private project cannot be asked
 # to prove it is private, and a public one declaring itself public proves nothing.
 PUBLISHED_PROJECTS_KEY = "published_projects"
+INVENTORY_KEY = "inventory"
 GENERATED_MARKERS = ("generated", "_gen.", ".generated.", "SYNC_STAMP")
 SCAN_SKIP_DIRS = {"data", "media", "models", "checkpoints", "logs", "reports", "fixtures", "vendor", "third_party"}
 IMPORT_SOURCE_EXTENSIONS = {".py", ".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs", ".go", ".rs"}

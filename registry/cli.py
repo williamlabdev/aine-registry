@@ -40,7 +40,7 @@ def write_local_config(args: argparse.Namespace) -> int:
     print_json({"status": "initialized", "config": ".aine/portfolio.local.json", "workspace_roots": [{"id": item["id"]} for item in roots]})
     return 0
 def load_snapshot(args: argparse.Namespace) -> dict[str, Any]:
-    if not args.snapshot: return discover(configured_roots(args), relationship_overlays=configured_overlays(args), published_projects=configured_published_projects(args))
+    if not args.snapshot: return discover(configured_roots(args), relationship_overlays=configured_overlays(args), published_projects=configured_published_projects(args), inventory=configured_inventory(args))
     try: return portable_snapshot(json.loads(Path(args.snapshot).read_text(encoding="utf-8")))
     except (OSError, json.JSONDecodeError) as exc: raise SystemExit(f"could not read snapshot: {exc}")
 
@@ -55,6 +55,7 @@ def add_workspace_options(command_parser: argparse.ArgumentParser) -> None:
     command_parser.add_argument("--snapshot", default=argparse.SUPPRESS, help="read an existing JSON snapshot")
     command_parser.add_argument("--exclude-project", action="append", default=argparse.SUPPRESS, help="exclude project name; repeat as needed")
     command_parser.add_argument("--config", default=argparse.SUPPRESS, help=argparse.SUPPRESS)
+    command_parser.add_argument("--inventory", default=argparse.SUPPRESS, help=argparse.SUPPRESS)
 
 def parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
@@ -67,6 +68,7 @@ def parser() -> argparse.ArgumentParser:
     p.add_argument("--snapshot", help="read an existing JSON snapshot")
     p.add_argument("--exclude-project", action="append", help="exclude project name; repeat as needed")
     p.add_argument("--config", help="local-only config path; never included in portable snapshots")
+    p.add_argument("--inventory", help="portfolio inventory file to join lifecycle classification from")
     sub = p.add_subparsers(dest="action", required=True)
     init = sub.add_parser("init"); init.add_argument("--root", dest="init_roots", action="append", required=True)
     discover_cmd = sub.add_parser("discover"); discover_cmd.add_argument("positional_roots", nargs="*"); discover_cmd.add_argument("--output"); add_workspace_options(discover_cmd)
@@ -189,7 +191,7 @@ def command(args: argparse.Namespace) -> int:
         return 0
     roots = configured_roots(args)
     if any(not root.is_dir() for root in roots): print("workspace root does not exist", file=sys.stderr); return 2
-    snapshot = load_snapshot(args) if args.snapshot else discover(roots, set(args.exclude_project or DEFAULT_EXCLUDED_PROJECTS), configured_overlays(args), configured_published_projects(args))
+    snapshot = load_snapshot(args) if args.snapshot else discover(roots, set(args.exclude_project or DEFAULT_EXCLUDED_PROJECTS), configured_overlays(args), configured_published_projects(args), configured_inventory(args))
     action = args.action
     if action == "portfolio": action = args.portfolio_action
     if action in {"discover", "scan", "portfolio-discover"}:
