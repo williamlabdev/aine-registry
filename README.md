@@ -242,6 +242,16 @@ left there drifts from the one the registry knows about without failing
 anything. The check names the file and stops: it does not parse the block, and
 having a registry manifest as well does not excuse it.
 
+A declared edge — a manifest `dependencies`/`relationships` entry or a
+relationship overlay — whose `target` no project answers to is reported as
+`REL-004` (severity `medium`, category `dependency`). Resolution coerces an
+unmatched target to an `external:` provider so the edge stays recordable, but
+a hand-written reference that resolves to nothing is a broken declaration, not
+a provider: left to `DEP-001` it would sit at `info` among ordinary package
+imports, and a typo in a target would never surface. An intentional
+third-party provider declares itself with an explicit `external:` prefix and
+is still reported by `DEP-001`; derived edges also stay with `DEP-001`.
+
 Preflight is read-only and reports matched projects, affected projects,
 source-of-truth rules, suggested validation commands, and unresolved changes:
 
