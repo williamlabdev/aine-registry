@@ -1,6 +1,6 @@
 {
   "project": {
-    "id": "tools.aine-registry",
+    "id": "aine.aine-registry",
     "owner": "william",
     "ownership": {"team": "aine-governance", "owners": ["william"], "delegates": []},
     "kind": "portfolio_registry",
@@ -22,13 +22,13 @@
     {"id": "registry-manifest-schema", "path": "registry/schema/project-manifest.v1.schema.json", "kind": "project_manifest_schema", "role": "schema", "source_of_truth": "registry.manifest_schema", "status": "present", "risk": "critical", "approval_required": true}
   ],
   "relationships": [
-    {"target": "tools.aine-control-plane-core", "relationship_type": "contract_consumer", "kind": "governance", "strength": "planned", "status": "planned"}
+    {"target": "aine.aine-control-plane-core", "relationship_type": "contract_consumer", "kind": "governance", "strength": "planned", "status": "planned"}
   ],
   "source_of_truth": [
-    {"domain": "registry.vision", "authority": {"project_id": "tools.aine-registry", "artifact": "registry-vision"}, "status": "declared"},
-    {"domain": "registry.blueprint", "authority": {"project_id": "tools.aine-registry", "artifact": "registry-blueprint"}, "status": "declared"},
-    {"domain": "registry.roadmap", "authority": {"project_id": "tools.aine-registry", "artifact": "registry-roadmap"}, "status": "declared"},
-    {"domain": "registry.snapshot_schema", "authority": {"project_id": "tools.aine-registry", "artifact": "registry-snapshot-schema"}, "status": "declared"},
-    {"domain": "registry.manifest_schema", "authority": {"project_id": "tools.aine-registry", "artifact": "registry-manifest-schema"}, "status": "declared"}
+    {"domain": "registry.vision", "authority": {"project_id": "aine.aine-registry", "artifact": "registry-vision"}, "status": "declared"},
+    {"domain": "registry.blueprint", "authority": {"project_id": "aine.aine-registry", "artifact": "registry-blueprint"}, "status": "declared"},
+    {"domain": "registry.roadmap", "authority": {"project_id": "aine.aine-registry", "artifact": "registry-roadmap"}, "status": "declared"},
+    {"domain": "registry.snapshot_schema", "authority": {"project_id": "aine.aine-registry", "artifact": "registry-snapshot-schema"}, "status": "declared"},
+    {"domain": "registry.manifest_schema", "authority": {"project_id": "aine.aine-registry", "artifact": "registry-manifest-schema"}, "status": "declared"}
   ]
 }
