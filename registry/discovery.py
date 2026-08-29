@@ -924,7 +924,10 @@ def discover(workspace_roots: list[Path], excluded_names: set[str] | None = None
             classification = index.get(inventory_module.rel_path(base, Path(item["path"])))
             if classification:
                 item["classification"] = classification
-        declared_not_discovered = sorted(key for key in index if key not in discovered)
+        # A checkout nested under an excluded project leaves discovery scope along
+        # with its parent; that's the exclusion propagating, not a missing checkout.
+        excluded_keys = {inventory_module.rel_path(base, item) for item in excluded_paths}
+        declared_not_discovered = sorted(key for key in index if key not in discovered and not any(key == ex or key.startswith(ex + "/") for ex in excluded_keys))
         discovered_not_declared = sorted(key for key in discovered if key not in index)
         applied: dict[str, int] = {}
         for key, entry in index.items():
