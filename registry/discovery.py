@@ -6,16 +6,19 @@ import hashlib
 import json
 import os
 import re
+from collections.abc import Iterator, Sequence
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 try:
     from .constants import *
     from .common import *
+    from . import inventory as inventory_module
 except ImportError:  # direct execution compatibility
     from constants import *
     from common import *
+    import inventory as inventory_module
 
 def discover_roots(workspace_root: Path, excluded: set[str]) -> tuple[list[Path], list[Path]]:
     roots: list[Path] = []
@@ -77,12 +80,17 @@ def declares_legacy_relationships(root: Path) -> bool:
     return descriptor.exists() and bool(LEGACY_RELATIONSHIP_KEY_RE.search(read_text(descriptor, 200_000)))
 
 
-def runtime_metadata(root: Path) -> dict[str, Any]:
+def owns_any_file(root: Path, roots: Sequence[Path], match: Callable[[str], bool]) -> bool:
+    """Whether `root` itself contains a matching file, excluding nested checkouts."""
+    return any(any(match(name) for name in files) for _current, _dirs, files in owned_walk(root, roots))
+
+
+def runtime_metadata(root: Path, roots: Sequence[Path]) -> dict[str, Any]:
     languages: set[str] = set(); frameworks: set[str] = set(); entrypoints: list[str] = []
-    if (root / "package.json").exists() or list(root.glob("**/package.json")): languages.add("javascript/typescript")
+    if (root / "package.json").exists() or owns_any_file(root, roots, lambda name: name == "package.json"): languages.add("javascript/typescript")
     if (root / "Cargo.toml").exists(): languages.add("rust")
     if (root / "go.mod").exists(): languages.add("go")
-    if (root / "pyproject.toml").exists() or list(root.glob("**/*.py")): languages.add("python")
+    if (root / "pyproject.toml").exists() or owns_any_file(root, roots, lambda name: name.endswith(".py")): languages.add("python")
     package_manager = None
     package = root / "package.json"
     if package.exists():
@@ -99,7 +107,7 @@ def runtime_metadata(root: Path) -> dict[str, Any]:
     return {"languages": sorted(languages), "frameworks": sorted(frameworks), "package_manager": package_manager, "entrypoints": entrypoints[:80]}
 
 
-def project_record(root: Path, portfolio_root: Path, workspace_root: Path, repos: dict[str, dict[str, Any]], workspace_root_id: str | None = None) -> dict[str, Any]:
+def project_record(root: Path, portfolio_root: Path, workspace_root: Path, repos: dict[str, dict[str, Any]], roots: Sequence[Path], workspace_root_id: str | None = None) -> dict[str, Any]:
     root_id = workspace_root_id or root_id_for(workspace_root)
     pid = project_id(root, portfolio_root, workspace_root, root_id)
     checkout_id = f"checkout.{root_id}.{rel(workspace_root, root).replace('/', '.') }".rstrip(".")
@@ -122,7 +130,7 @@ def project_record(root: Path, portfolio_root: Path, workspace_root: Path, repos
     return {
         "project_id": pid, "root_id": root_id, "repository_id": repo["repository_id"], "checkout_id": checkout_id,
         "name": root.name, "path": path, "root": path, "kind": classify_project(root),
-        "git": repo["git"], "runtime": runtime_metadata(root), "instructions": instructions,
+        "git": repo["git"], "runtime": runtime_metadata(root, roots), "instructions": instructions,
         "commands": commands, "owner": "UNKNOWN", "ownership": {"team": "UNKNOWN", "owners": [], "delegates": []}, "capabilities": [], "risk": {"default": "low", "high_risk_paths": []}, "approval_required": False, "policy": {}, "deployment": [],
         "evidence": [f"{path}/{name}" for name in sorted(MANIFEST_NAMES | INSTRUCTION_NAMES) if (root / name).exists()],
     }
@@ -213,10 +221,44 @@ def ci_metadata(path: Path, project_root: Path) -> dict[str, Any] | None:
     return {"provider": "github_actions", "kind": "workflow", "jobs": jobs}
 
 
-def artifact_records(root: Path, workspace_root: Path, pid: str, root_id: str) -> list[dict[str, Any]]:
-    records: list[dict[str, Any]] = []
+def nested_root_relpaths(root: Path, roots: Sequence[Path]) -> set[str]:
+    """Paths, relative to `root`, of the Git roots nested inside it.
+
+    A checkout nested inside another checkout is a separate repository, so its
+    files belong to it and not to the umbrella that happens to contain it. The
+    full discovered-root list is used rather than the active subset: a Git
+    boundary exists whether or not the child appears in the project graph.
+    """
+    base = root.resolve()
+    nested: set[str] = set()
+    for candidate in roots:
+        resolved = candidate.resolve()
+        if resolved != base and base in resolved.parents:
+            nested.add(resolved.relative_to(base).as_posix())
+    return nested
+
+
+def owned_walk(root: Path, roots: Sequence[Path]) -> Iterator[tuple[str, list[str], list[str]]]:
+    """Walk only the files `root` owns.
+
+    Prunes the same ignored and skipped directories as before, and additionally
+    prunes every nested Git root. Files the parent owns stay visible: only
+    directories that are themselves checkout roots are removed.
+    """
+    nested = nested_root_relpaths(root, roots)
     for current, dirs, files in os.walk(root):
-        dirs[:] = [d for d in dirs if d not in DEFAULT_IGNORES and d not in SCAN_SKIP_DIRS]
+        prefix = Path(current).relative_to(root).as_posix()
+        dirs[:] = [
+            directory for directory in dirs
+            if directory not in DEFAULT_IGNORES and directory not in SCAN_SKIP_DIRS
+            and (directory if prefix == "." else f"{prefix}/{directory}") not in nested
+        ]
+        yield current, dirs, files
+
+
+def artifact_records(root: Path, workspace_root: Path, pid: str, root_id: str, roots: Sequence[Path]) -> list[dict[str, Any]]:
+    records: list[dict[str, Any]] = []
+    for current, dirs, files in owned_walk(root, roots):
         for filename in files:
             path = Path(current) / filename; path_rel = rel(root, path)
             contract = openapi_metadata(path)
@@ -465,14 +507,13 @@ def make_edge(source_pid: str, target_pid: str, kind: str, strength: str, status
     return edge
 
 
-def text_edges(root: Path, workspace_root: Path, pid: str, roots: list[Path], projects_by_root: dict[str, dict[str, Any]], projects: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def text_edges(root: Path, workspace_root: Path, pid: str, roots: list[Path], projects_by_root: dict[str, dict[str, Any]], projects: list[dict[str, Any]], all_roots: Sequence[Path]) -> list[dict[str, Any]]:
     patterns = [
         (re.compile(r"(?:/[A-Za-z0-9_./~:@%+-]+|\.\./[A-Za-z0-9_.-]+(?:/[A-Za-z0-9_./-]+)?)"), "filesystem"),
         (re.compile(r"(?:MCP_BASE_URL|MCP_SERVER_URL|API_BASE_URL|SERVICE_URL)"), "runtime_api"),
     ]
     seen: set[str] = set(); edges: list[dict[str, Any]] = []
-    for current, dirs, files in os.walk(root):
-        dirs[:] = [d for d in dirs if d not in DEFAULT_IGNORES and d not in SCAN_SKIP_DIRS]
+    for current, dirs, files in owned_walk(root, all_roots):
         for filename in files:
             path = Path(current) / filename
             if path.suffix.lower() not in {".ts", ".tsx", ".js", ".mjs", ".py", ".rs", ".go", ".yaml", ".yml", ".json", ".md", ".toml", ".sh", ".plist"}: continue
@@ -582,7 +623,7 @@ def package_name(specifier: str) -> str:
     return specifier.split("/")[0].split(".")[0]
 
 
-def module_import_records(root: Path, workspace_root: Path, project: dict[str, Any], roots: list[Path], projects_by_root: dict[str, dict[str, Any]], projects: list[dict[str, Any]], package_index: dict[str, str]) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+def module_import_records(root: Path, workspace_root: Path, project: dict[str, Any], roots: list[Path], projects_by_root: dict[str, dict[str, Any]], projects: list[dict[str, Any]], package_index: dict[str, str], all_roots: Sequence[Path]) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     records: list[dict[str, Any]] = []
     edges: list[dict[str, Any]] = []
     patterns = {
@@ -609,8 +650,7 @@ def module_import_records(root: Path, workspace_root: Path, project: dict[str, A
     if go_mod.exists():
         module_match = re.search(r"^\s*module\s+(\S+)", read_text(go_mod), re.MULTILINE)
         go_module = module_match.group(1) if module_match else None
-    for current, dirs, files in os.walk(root):
-        dirs[:] = [directory for directory in dirs if directory not in DEFAULT_IGNORES and directory not in SCAN_SKIP_DIRS]
+    for current, dirs, files in owned_walk(root, all_roots):
         for filename in files:
             path = Path(current) / filename
             suffix = path.suffix.lower()
@@ -732,7 +772,7 @@ def findings(projects: list[dict[str, Any]], artifacts: list[dict[str, Any]], de
     return result
 
 
-def discover(workspace_roots: list[Path], excluded_names: set[str] | None = None, relationship_overlays: list[dict[str, Any]] | None = None, published_projects: list[str] | None = None) -> dict[str, Any]:
+def discover(workspace_roots: list[Path], excluded_names: set[str] | None = None, relationship_overlays: list[dict[str, Any]] | None = None, published_projects: list[str] | None = None, inventory: dict[str, Any] | None = None) -> dict[str, Any]:
     excluded_names = set(excluded_names or DEFAULT_EXCLUDED_PROJECTS)
     roots = [path.resolve() for path in workspace_roots]
     portfolio_parent = Path(os.path.commonpath([str(path) for path in roots]))
@@ -754,7 +794,7 @@ def discover(workspace_roots: list[Path], excluded_names: set[str] | None = None
         repo_records[checkout_id] = {"repository_id": repository_id, "git": gm}
     for item in all_projects:
         workspace_root = root_for_project[str(item)]
-        record = project_record(item, portfolio_parent, workspace_root, repo_records, root_ids[str(workspace_root)])
+        record = project_record(item, portfolio_parent, workspace_root, repo_records, all_projects, root_ids[str(workspace_root)])
         projects_by_root[str(item)] = record
     projects = sorted(projects_by_root.values(), key=lambda p: p["project_id"])
     active_ids = {p["project_id"] for p in projects}
@@ -795,7 +835,7 @@ def discover(workspace_roots: list[Path], excluded_names: set[str] | None = None
     artifacts: list[dict[str, Any]] = []
     manifest_records: list[tuple[dict[str, Any], Path, Path]] = []
     for item in active_root_paths:
-        p = projects_by_root[str(item)]; artifacts.extend(artifact_records(item, root_for_project[str(item)], p["project_id"], p["root_id"]))
+        p = projects_by_root[str(item)]; artifacts.extend(artifact_records(item, root_for_project[str(item)], p["project_id"], p["root_id"], all_projects))
         manifest_records.append((p, item, root_for_project[str(item)]))
     manifest_artifacts: list[dict[str, Any]] = []
     manifest_dependencies: list[dict[str, Any]] = []
@@ -825,14 +865,14 @@ def discover(workspace_roots: list[Path], excluded_names: set[str] | None = None
     import_dependencies: list[dict[str, Any]] = []
     for item in active_root_paths:
         project = projects_by_root[str(item)]
-        discovered_imports, discovered_edges = module_import_records(item, root_for_project[str(item)], project, active_root_paths, projects_by_root, projects, package_index)
+        discovered_imports, discovered_edges = module_import_records(item, root_for_project[str(item)], project, active_root_paths, projects_by_root, projects, package_index, all_projects)
         imports.extend(discovered_imports)
         import_dependencies.extend(discovered_edges)
     dependencies: list[dict[str, Any]] = []
     for item in active_root_paths:
         p = projects_by_root[str(item)]; workspace_root = root_for_project[str(item)]
         dependencies.extend(package_edges(item, portfolio_parent, workspace_root, p["project_id"], projects, package_index))
-        dependencies.extend(text_edges(item, workspace_root, p["project_id"], active_root_paths, projects_by_root, projects))
+        dependencies.extend(text_edges(item, workspace_root, p["project_id"], active_root_paths, projects_by_root, projects, all_projects))
     dependencies.extend(manifest_dependencies)
     dependencies.extend(import_dependencies)
     raw_dependencies = list(dependencies)
@@ -851,6 +891,43 @@ def discover(workspace_roots: list[Path], excluded_names: set[str] | None = None
     dependencies = sorted(grouped.values(), key=lambda e: e["dependency_id"])
     relationships = sorted((edge for edge in dependencies if edge.get("relationship_source") in RELATIONSHIP_SOURCES), key=lambda e: e["dependency_id"])
     excluded = [{"name": Path(path).name, "path": str(path), "reason": "excluded_from_active_registry"} for path in sorted(set(excluded_paths))]
+    inventory_block: dict[str, Any] | None = None
+    inventory_findings: list[dict[str, Any]] = []
+    if inventory is not None:
+        # Lifecycle is a portfolio decision, not a filesystem fact. The join
+        # records what the inventory says and reports where the two disagree; it
+        # never invents a classification for a checkout the inventory omits.
+        joined = inventory_module.classifications(inventory, roots)
+        base, index = joined["base"], joined["index"]
+        discovered: dict[str, Path] = {inventory_module.rel_path(base, item): item for item in all_projects}
+        for item in excluded_paths:
+            discovered.setdefault(inventory_module.rel_path(base, item), item)
+        for project in projects:
+            classification = index.get(inventory_module.rel_path(base, project_roots[project["project_id"]]))
+            project["classification"] = classification or {"lifecycle": "UNKNOWN", "group": "UNKNOWN", "source": joined["source"]}
+        for item in excluded:
+            classification = index.get(inventory_module.rel_path(base, Path(item["path"])))
+            if classification:
+                item["classification"] = classification
+        declared_not_discovered = sorted(key for key in index if key not in discovered)
+        discovered_not_declared = sorted(key for key in discovered if key not in index)
+        applied: dict[str, int] = {}
+        for key, entry in index.items():
+            if key in discovered:
+                applied[entry["lifecycle"]] = applied.get(entry["lifecycle"], 0) + 1
+        inventory_block = {
+            "schema": inventory.get("schema"),
+            "source": joined["source"],
+            "observed_at": inventory.get("observed_at"),
+            "revised": inventory.get("revised"),
+            "declared": {"rows_in_scope": len(index), "rows_out_of_scope": len(joined["out_of_scope"])},
+            "applied": dict(sorted(applied.items())),
+            "drift": {"declared_not_discovered": declared_not_discovered, "discovered_not_declared": discovered_not_declared},
+        }
+        if declared_not_discovered:
+            inventory_findings.append({"finding_id": "INV-001", "severity": "medium", "category": "inventory", "status": "missing", "subject": "portfolio.inventory", "message": "The portfolio inventory declares checkouts that discovery did not find.", "evidence": declared_not_discovered})
+        if discovered_not_declared:
+            inventory_findings.append({"finding_id": "INV-002", "severity": "medium", "category": "inventory", "status": "unclassified", "subject": "portfolio.inventory", "message": "Discovery found checkouts the portfolio inventory does not classify.", "evidence": discovered_not_declared})
     root_data = [{k: v for k, v in item.items() if k != "local_path"} for item in root_records]
     snapshot: dict[str, Any] = {
         "schema": SCHEMA, "snapshot_id": None,
@@ -861,6 +938,8 @@ def discover(workspace_roots: list[Path], excluded_names: set[str] | None = None
         "source_of_truth": source_truth_rules(projects, artifacts) + manifest_source_truth, "findings": [], "exclusions": sorted(DEFAULT_IGNORES), "excluded_projects": excluded,
         "_local_roots": [{"root_id": item["root_id"], "local_path": item["local_path"]} for item in root_records],
     }
-    snapshot["findings"] = findings(projects, artifacts, dependencies, excluded, snapshot["source_of_truth"], raw_dependencies, alias_conflicts, published_ids, legacy_relationship_manifests)
+    if inventory_block is not None:
+        snapshot["inventory"] = inventory_block
+    snapshot["findings"] = findings(projects, artifacts, dependencies, excluded, snapshot["source_of_truth"], raw_dependencies, alias_conflicts, published_ids, legacy_relationship_manifests) + inventory_findings
     snapshot["snapshot_id"] = snapshot_hash(snapshot)
     return portable_snapshot(snapshot)

@@ -13,6 +13,7 @@ from urllib.request import urlopen
 
 sys.path.insert(0, str(Path(__file__).parent))
 import aine_registry as registry
+import inventory
 
 
 def make_git_project(path: Path, remote: str, files: dict[str, str] | None = None) -> None:
@@ -1297,5 +1298,270 @@ class DeclaredArtifactExistenceTests(unittest.TestCase):
             self.assertEqual(reported[0]["evidence"], ["engine/.aine/registry.json"])
 
 
+class NestedGitRootAttributionTests(unittest.TestCase):
+    """A checkout nested inside another checkout owns its own files.
+
+    Both directions are asserted. False attribution is an umbrella claiming a
+    child's artifacts, imports, or language. Evidence loss is the umbrella
+    losing files it does own, which a pure absence check cannot catch. The
+    assertions compare whole sorted lists rather than counts: a count survives
+    a swap, and `MAX_ARTIFACTS_PER_PROJECT` truncates silently, so an umbrella
+    that absorbs its children can reach the cap and drop its own records with
+    no error raised anywhere.
+    """
+
+    @staticmethod
+    def build(temp: str) -> Path:
+        root = Path(temp) / "workspace"
+        make_git_project(root / "umbrella", "https://example.test/umbrella.git", {
+            "specs-manifest.json": json.dumps({"owner": "umbrella"}),
+            "parent_module.py": "import parent_only_marker\n",
+            "notes.md": "see ../sibling/parent-edge\n",
+        })
+        make_git_project(root / "umbrella" / "child", "https://example.test/child.git", {
+            "specs-manifest.json": json.dumps({"owner": "child"}),
+            "child_module.py": "import child_only_marker\n",
+            "notes.md": "see ../sibling/child-edge\n",
+            "package.json": json.dumps({"name": "child"}),
+        })
+        make_git_project(root / "sibling", "https://example.test/sibling.git", {"README.md": "sibling\n"})
+        return root
+
+    @staticmethod
+    def project_id(snapshot: dict, path: str) -> str:
+        return next(p["project_id"] for p in snapshot["projects"] if p["path"] == path)
+
+    def snapshot(self, temp: str) -> dict:
+        return registry.discover([self.build(temp)], excluded_names=set())
+
+    def test_both_checkouts_are_discovered_as_separate_projects(self):
+        with tempfile.TemporaryDirectory() as temp:
+            snapshot = self.snapshot(temp)
+            self.assertEqual(
+                sorted(p["path"] for p in snapshot["projects"]),
+                ["sibling", "umbrella", "umbrella/child"],
+            )
+
+    def test_artifacts_are_attributed_to_the_owning_checkout(self):
+        with tempfile.TemporaryDirectory() as temp:
+            snapshot = self.snapshot(temp)
+            umbrella = self.project_id(snapshot, "umbrella")
+            child = self.project_id(snapshot, "umbrella/child")
+            self.assertEqual(
+                sorted(a["path"] for a in snapshot["artifacts"] if a["project_id"] == umbrella),
+                ["specs-manifest.json"],
+                "the umbrella must keep its own artifact and claim none of the child's",
+            )
+            self.assertEqual(
+                sorted(a["path"] for a in snapshot["artifacts"] if a["project_id"] == child),
+                ["specs-manifest.json"],
+                "the child's artifact must survive pruning, relative to the child",
+            )
+
+    def test_imports_are_attributed_to_the_owning_checkout(self):
+        with tempfile.TemporaryDirectory() as temp:
+            snapshot = self.snapshot(temp)
+            umbrella = self.project_id(snapshot, "umbrella")
+            child = self.project_id(snapshot, "umbrella/child")
+            by_project = {}
+            for record in snapshot["imports"]:
+                by_project.setdefault(record["source_project_id"], []).append(
+                    (record["source_path"], record["specifier"])
+                )
+            self.assertEqual(sorted(by_project.get(umbrella, [])), [("parent_module.py", "parent_only_marker")])
+            self.assertEqual(sorted(by_project.get(child, [])), [("child_module.py", "child_only_marker")])
+
+    def test_language_detection_stops_at_the_git_boundary(self):
+        with tempfile.TemporaryDirectory() as temp:
+            snapshot = self.snapshot(temp)
+            languages = {
+                p["path"]: set(p["runtime"]["languages"]) for p in snapshot["projects"]
+            }
+            self.assertIn("python", languages["umbrella"], "the umbrella owns parent_module.py")
+            self.assertNotIn(
+                "javascript/typescript", languages["umbrella"],
+                "only the child holds a package.json; the umbrella must not inherit its language",
+            )
+            self.assertIn("javascript/typescript", languages["umbrella/child"])
+
+    def test_parent_owned_files_beside_a_child_root_remain_visible(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = self.build(temp)
+            nested = Path(temp) / "workspace" / "umbrella" / "child"
+            (root / "umbrella" / "courses.generated.json").write_text("{}", encoding="utf-8")
+            snapshot = registry.discover([root], excluded_names=set())
+            umbrella = self.project_id(snapshot, "umbrella")
+            self.assertTrue(nested.is_dir(), "the fixture must still nest a real checkout")
+            self.assertEqual(
+                sorted(a["path"] for a in snapshot["artifacts"] if a["project_id"] == umbrella),
+                ["courses.generated.json", "specs-manifest.json"],
+                "pruning a child root must not remove sibling files the parent owns",
+            )
+
+
 if __name__ == "__main__":
     unittest.main()
+
+
+INVENTORY_DOCUMENT = """schema: core.portfolio.inventory.v1
+observed_at: 2026-01-01
+revised: 2026-01-02
+topology: multi-root-polyrepo
+
+workspace_roots:
+  - id: ws
+    logical_path: ws
+    lifecycle: active
+    registry_included: true
+  - id: attic
+    logical_path: attic
+    lifecycle: quarantined
+    registry_included: false
+
+repositories:
+  active_core:
+    - path: ws/alpha
+    - path: ws/beta
+      role: umbrella
+
+vendored_git_checkouts:
+  - path: ws/vendor
+    owner: ws/beta
+    classification: ignored-runtime-dependency
+
+non_projects:
+  - path: attic/fragment
+    classification: incomplete-orphan-fragment
+    git_repository: false
+
+counts:
+  active_core_git_roots: 2
+"""
+
+
+class InventoryReaderTests(unittest.TestCase):
+    """The reader is hand-rolled, so its refusals are the thing worth testing.
+
+    Registry declares no dependencies, so the inventory is parsed rather than
+    loaded by a YAML library. The risk that carries is a silent misread: a
+    document the reader half-understands would produce a plausible-looking but
+    wrong classification. Each case below is a construct the reader must refuse
+    outright rather than interpret.
+    """
+
+    def test_supported_shape_round_trips(self):
+        document = inventory.parse_document(INVENTORY_DOCUMENT)
+        self.assertEqual(document["schema"], "core.portfolio.inventory.v1")
+        self.assertEqual(document["counts"], {"active_core_git_roots": 2})
+        self.assertEqual(
+            document["repositories"]["active_core"],
+            [{"path": "ws/alpha"}, {"path": "ws/beta", "role": "umbrella"}],
+        )
+        self.assertEqual(document["workspace_roots"][0]["registry_included"], True)
+        self.assertEqual(document["non_projects"][0]["git_repository"], False)
+
+    def test_unsupported_constructs_raise_instead_of_being_guessed(self):
+        cases = {
+            "tab indentation": "schema: x\nkey:\n\t- path: a\n",
+            "odd indentation": "schema: x\nkey:\n   sub: a\n",
+            "flow sequence": "schema: x\nkey: [a, b]\n",
+            "flow mapping": "schema: x\nkey: {a: b}\n",
+            "anchor": "schema: x\nkey: &anchor a\n",
+            "quoted scalar": "schema: x\nkey: 'a'\n",
+            "block scalar": "schema: x\nkey: |\n  text\n",
+            "trailing comment": "schema: x\nkey: a # note\n",
+            "missing space after colon": "schema: x\nkey:a\n",
+            "duplicate key": "schema: x\nkey: a\nkey: b\n",
+            "duplicate key in item": "schema: x\nkey:\n  - path: a\n    path: b\n",
+            "key without value or block": "schema: x\nkey:\n",
+            "bare sequence item": "schema: x\nkey:\n  - a\n",
+            "nested block in sequence item": "schema: x\nkey:\n  - path: a\n    sub:\n      deep: b\n",
+            "empty document": "\n# only a comment\n",
+        }
+        for name, text in cases.items():
+            with self.subTest(name):
+                with self.assertRaises(inventory.InventoryFormatError):
+                    inventory.parse_document(text)
+
+    def test_wrong_schema_is_refused(self):
+        with tempfile.TemporaryDirectory() as raw:
+            path = Path(raw) / "inventory.yaml"
+            path.write_text("schema: some.other.v9\nworkspace_roots:\n  - id: a\n    logical_path: a\n", encoding="utf-8")
+            with self.assertRaises(inventory.InventoryFormatError):
+                inventory.load(path)
+
+
+class InventoryJoinTests(unittest.TestCase):
+    """Lifecycle comes from the portfolio's decision, not from the filesystem.
+
+    Discovery can see that a checkout exists; it cannot see that the checkout is
+    a vendored runtime dependency rather than a maintained project. These tests
+    fix the join's two obligations: apply what the inventory declares, and report
+    every disagreement in both directions instead of absorbing it.
+    """
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.base = Path(self._tmp.name).resolve()
+        self.workspace = self.base / "ws"
+        for name in ("alpha", "beta", "vendor"):
+            make_git_project(self.workspace / name, f"https://example.com/{name}.git", {"README.md": name})
+        self.inventory_path = self.base / "inventory.yaml"
+        self.inventory_path.write_text(INVENTORY_DOCUMENT, encoding="utf-8")
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def load(self, text: str | None = None) -> dict:
+        if text is not None:
+            self.inventory_path.write_text(text, encoding="utf-8")
+        return inventory.load(self.inventory_path)
+
+    def snapshot(self, text: str | None = None) -> dict:
+        return registry.discover([self.workspace], excluded_names=set(), inventory=self.load(text))
+
+    def classification_of(self, snapshot: dict, name: str) -> dict:
+        return next(item["classification"] for item in snapshot["projects"] if item["name"] == name)
+
+    def test_base_is_derived_from_the_rows_not_assumed(self):
+        joined = inventory.classifications(self.load(), [self.workspace])
+        self.assertEqual(joined["base"], self.base)
+        self.assertEqual(sorted(joined["index"]), ["ws/alpha", "ws/beta", "ws/vendor"])
+
+    def test_declared_classification_reaches_the_project_record(self):
+        snapshot = self.snapshot()
+        self.assertEqual(self.classification_of(snapshot, "alpha")["lifecycle"], "active")
+        self.assertEqual(self.classification_of(snapshot, "beta")["role"], "umbrella")
+        vendor = self.classification_of(snapshot, "vendor")
+        self.assertEqual(vendor["lifecycle"], "vendored")
+        self.assertEqual(vendor["owner"], "ws/beta")
+        self.assertEqual(snapshot["inventory"]["applied"], {"active": 2, "vendored": 1})
+
+    def test_rows_outside_the_scanned_roots_are_not_reported_as_drift(self):
+        snapshot = self.snapshot()
+        self.assertEqual(snapshot["inventory"]["declared"], {"rows_in_scope": 3, "rows_out_of_scope": 1})
+        self.assertEqual(snapshot["inventory"]["drift"], {"declared_not_discovered": [], "discovered_not_declared": []})
+        self.assertEqual([item for item in snapshot["findings"] if item["finding_id"].startswith("INV-")], [])
+
+    def test_a_declared_checkout_that_does_not_exist_is_reported(self):
+        snapshot = self.snapshot(INVENTORY_DOCUMENT.replace("    - path: ws/alpha\n", "    - path: ws/alpha\n    - path: ws/ghost\n"))
+        self.assertEqual(snapshot["inventory"]["drift"]["declared_not_discovered"], ["ws/ghost"])
+        finding = next(item for item in snapshot["findings"] if item["finding_id"] == "INV-001")
+        self.assertEqual(finding["evidence"], ["ws/ghost"])
+
+    def test_a_discovered_checkout_the_inventory_omits_is_reported(self):
+        make_git_project(self.workspace / "gamma", "https://example.com/gamma.git", {"README.md": "gamma"})
+        snapshot = self.snapshot()
+        self.assertEqual(snapshot["inventory"]["drift"]["discovered_not_declared"], ["ws/gamma"])
+        finding = next(item for item in snapshot["findings"] if item["finding_id"] == "INV-002")
+        self.assertEqual(finding["evidence"], ["ws/gamma"])
+        self.assertEqual(self.classification_of(snapshot, "gamma"), {"lifecycle": "UNKNOWN", "group": "UNKNOWN", "source": "inventory.yaml"})
+
+    def test_without_an_inventory_discovery_classifies_nothing(self):
+        snapshot = registry.discover([self.workspace], excluded_names=set())
+        self.assertNotIn("inventory", snapshot)
+        self.assertEqual([item for item in snapshot["projects"] if "classification" in item], [])
+
+    def test_join_output_stays_portable(self):
+        snapshot = self.snapshot()
+        self.assertTrue(registry.no_absolute_paths(snapshot["inventory"]))

@@ -13,9 +13,11 @@ from typing import Any
 from urllib.parse import urlsplit, urlunsplit
 
 try:
-    from .constants import LOCAL_PATH_RE, PUBLISHED_PROJECTS_KEY, RELATIONSHIP_OVERLAY_KEY
+    from .constants import INVENTORY_KEY, LOCAL_PATH_RE, PUBLISHED_PROJECTS_KEY, RELATIONSHIP_OVERLAY_KEY
+    from . import inventory
 except ImportError:  # direct execution compatibility
-    from constants import LOCAL_PATH_RE, PUBLISHED_PROJECTS_KEY, RELATIONSHIP_OVERLAY_KEY
+    from constants import INVENTORY_KEY, LOCAL_PATH_RE, PUBLISHED_PROJECTS_KEY, RELATIONSHIP_OVERLAY_KEY
+    import inventory
 
 
 def run_git(root: Path, *args: str) -> str:
@@ -204,6 +206,20 @@ def configured_overlays(args: argparse.Namespace) -> list[dict[str, Any]]:
         item for item in overlays
         if isinstance(item, dict) and item.get("project") and isinstance(item.get("relationships", []), list)
     ]
+
+
+def configured_inventory(args: argparse.Namespace) -> dict[str, Any] | None:
+    """The portfolio inventory to join, if one is declared.
+
+    Undeclared, discovery classifies nothing and behaves exactly as before. Once
+    declared, a missing or malformed file raises: an operator who asked for the
+    join and silently got no classification would read the absence as "nothing
+    to classify" rather than as a broken configuration.
+    """
+    declared = getattr(args, "inventory", None) or load_local_config(args).get(INVENTORY_KEY)
+    if not isinstance(declared, str) or not declared.strip():
+        return None
+    return inventory.load(Path(declared).expanduser().resolve())
 
 
 def configured_published_projects(args: argparse.Namespace) -> list[str]:
