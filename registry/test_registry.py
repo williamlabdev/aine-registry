@@ -1644,6 +1644,28 @@ class InventoryJoinTests(unittest.TestCase):
         finding = next(item for item in snapshot["findings"] if item["finding_id"] == "INV-001")
         self.assertEqual(finding["evidence"], ["ws/ghost"])
 
+    def test_excluding_a_project_does_not_report_its_nested_vendored_checkout_as_missing(self):
+        make_git_project(self.workspace / "vendor" / "third_party" / "nested", "https://example.com/nested.git", {"README.md": "nested"})
+        text = INVENTORY_DOCUMENT.replace(
+            "  - path: ws/vendor\n    owner: ws/beta\n    classification: ignored-runtime-dependency\n",
+            "  - path: ws/vendor\n    owner: ws/beta\n    classification: ignored-runtime-dependency\n  - path: ws/vendor/third_party/nested\n    owner: ws/beta\n    classification: ignored-runtime-dependency\n",
+        )
+        snapshot = registry.discover([self.workspace], excluded_names={"vendor"}, inventory=self.load(text))
+        self.assertEqual(snapshot["inventory"]["drift"]["declared_not_discovered"], [])
+        self.assertEqual([item for item in snapshot["findings"] if item["finding_id"] == "INV-001"], [])
+
+    def test_excluding_a_project_does_not_report_the_project_itself_as_missing(self):
+        snapshot = registry.discover([self.workspace], excluded_names={"vendor"}, inventory=self.load())
+        self.assertEqual(snapshot["inventory"]["drift"]["declared_not_discovered"], [])
+        self.assertEqual([item for item in snapshot["findings"] if item["finding_id"] == "INV-001"], [])
+
+    def test_excluding_a_project_still_reports_an_unrelated_missing_checkout(self):
+        text = INVENTORY_DOCUMENT.replace("    - path: ws/alpha\n", "    - path: ws/alpha\n    - path: ws/ghost\n")
+        snapshot = registry.discover([self.workspace], excluded_names={"vendor"}, inventory=self.load(text))
+        self.assertEqual(snapshot["inventory"]["drift"]["declared_not_discovered"], ["ws/ghost"])
+        finding = next(item for item in snapshot["findings"] if item["finding_id"] == "INV-001")
+        self.assertEqual(finding["evidence"], ["ws/ghost"])
+
     def test_a_discovered_checkout_the_inventory_omits_is_reported(self):
         make_git_project(self.workspace / "gamma", "https://example.com/gamma.git", {"README.md": "gamma"})
         snapshot = self.snapshot()
