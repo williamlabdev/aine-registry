@@ -41,7 +41,7 @@ implementation and the producer of portable portfolio snapshots. Project-local
 `.aine/registry.json` files declare ownership, validation commands,
 relationships, and sources of truth; they do not authorize execution. The
 Registry remains read-only and does not become an approval service, agent
-runner, or deployment controller. `aine-control-plane-core` and the private
+runner, or deployment controller. `aine-control-plane` and the private
 Control Plane consume snapshots as report-only governance surfaces, while
 Orvena and airt remain separate enforcement products connected only through
 future evidence adapters with a shared run/correlation identifier.
