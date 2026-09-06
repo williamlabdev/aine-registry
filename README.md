@@ -562,6 +562,13 @@ Absolute local paths are used only during discovery and are redacted from portab
 
 Experimental public core. Relationship inference is evidence-based and incomplete for dynamic runtime behavior. Unknown relationships remain `UNKNOWN`; they are not silently treated as absent.
 
+## Further reading
+
+Why portfolio-level discovery exists, on the author's site:
+
+- [Change-Intent Governance: The Missing Layer](https://williamlab.dev/articles/change-intent-governance) — the impact analysis this registry's snapshots feed.
+- [Turning Organizational Legitimacy Into Something Checkable](https://williamlab.dev/articles/validating-organizational-legitimacy) — naming who is accountable when an agent-driven change fails.
+
 ## License
 
 Apache-2.0. See [LICENSE](LICENSE) and [NOTICE](NOTICE).
