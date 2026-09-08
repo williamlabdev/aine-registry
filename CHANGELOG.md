@@ -10,6 +10,14 @@ All notable changes to AINE Registry are recorded here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+- `registry.v1.schema.json` now declares `projects[].name`, which discovery has
+  always emitted and which downstream consumers (aine-control-plane's snapshot
+  validator) already require. The schema under-described discovery output;
+  no snapshot content changes. Note that `--snapshot` reads any JSON without
+  schema enforcement, so an externally produced snapshot lacking `name` is
+  still accepted by this CLI and only rejected downstream.
+
 ### Added
 - The `ART-001` finding: an artifact a manifest declares as present whose path
   does not exist is reported, because every claim hanging off it — a

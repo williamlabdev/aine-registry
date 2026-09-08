@@ -28,9 +28,10 @@
     },
     "project": {
       "type": "object",
-      "required": ["project_id", "root_id", "repository_id", "checkout_id", "path", "kind"],
+      "required": ["project_id", "name", "root_id", "repository_id", "checkout_id", "path", "kind"],
       "properties": {
         "project_id": {"type": "string"},
+        "name": {"type": "string", "description": "Human-readable project label; the discovery root directory name."},
         "root_id": {"type": "string"},
         "repository_id": {"type": "string"},
         "checkout_id": {"type": "string"},
